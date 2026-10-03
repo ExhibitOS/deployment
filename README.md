@@ -4,7 +4,13 @@ Deployment adapters. OCI/compose, Generic SSH, DNS/TLS, OpenTofu와 provider ada
 
 ## 현재 상태
 
-2026-10-01 기준 README와 에이전트 작업 규칙만 있는 준비 단계다. 제품 코드, 실행 환경, dependency manifest, CI, 자동 테스트와 설치 파일은 아직 없다. 아래 기능과 검사는 계획이며 구현 완료를 뜻하지 않는다.
+2026-10-03 기준 README·에이전트 작업 규칙·운영자 준비 확인 문서가 있는 준비 단계다. 제품 코드, 실행 환경, dependency manifest, CI, 자동 테스트와 설치 파일은 아직 없다. 아래 기능과 검사는 계획이며 구현 완료를 뜻하지 않는다.
+
+## 운영자가 시작할 곳
+
+[배포 준비 확인](docs/preflight.md)에서 현재 실행 가능한 공개 OED 형식 검사와
+환경·비용·복원 확인 항목을 읽습니다. [확인 기록 양식](docs/preflight-record-template.md)에
+증거와 미확인 항목을 분리하여 남깁니다. 이 문서의 준비 확인은 서버 배포를 실행하지 않습니다.
 
 ## 책임과 계약
 
