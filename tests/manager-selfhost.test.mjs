@@ -1,14 +1,14 @@
 // Copyright 2026 ExhibitOS contributors. SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {planSelfhost,applySelfhost} from '../src/manager-selfhost.mjs';
 const digest=b=>createHash('sha256').update(b).digest('hex');
 async function fixture(t){
- const root=await mkdtemp(join(tmpdir(),'exhibitos-selfhost-'));t.after(()=>rm(root,{recursive:true,force:true}));await mkdir(join(root,'bundle'),{mode:0o700});
+ const root=await realpath(await mkdtemp(join(tmpdir(),'exhibitos-selfhost-')));t.after(()=>rm(root,{recursive:true,force:true}));await mkdir(join(root,'bundle'),{mode:0o700});
  const image=`ghcr.io/exhibitos/platform@sha256:${'a'.repeat(64)}`,db=`postgres@sha256:${'b'.repeat(64)}`;
  const compose=JSON.stringify({name:'exhibitos-fixture',services:{platform:{image},database:{image:db}}});
  const manifest=JSON.stringify({schemaVersion:'1.0.0-draft.1',protocolVersion:'1',preferredEngine:'docker',projectName:'exhibitos-fixture',composeSha256:digest(compose),services:['platform','database'],images:[{reference:image},{reference:db}],ports:[13200],openUrl:'http://127.0.0.1:13200',readinessUrl:'http://127.0.0.1:13200/api/v1/readiness'});
@@ -52,4 +52,12 @@ test('completed child result cannot bless configuration drift or an unbounded jo
  const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
  await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>{await writeFile(join(f.root,'runtime.env'),'changed-during-child\n');return JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1});}}),{code:'SELFHOST_SOURCE_CHANGED'});
  assert.equal(JSON.stringify(plan).includes('changed-during-child'),false);
+});
+
+test('malformed or downgraded Install job response is refused while private binding is retained',async t=>{
+ const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:false,state:'completed',attempt:1})}),{code:'SELFHOST_MANAGER_RESPONSE_INVALID'});
+ const binding=JSON.parse((await readFile(join(f.root,'deployment-binding.json'))).toString());assert.equal(binding.project,'exhibitos-fixture');
+ const fresh=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});assert.equal(fresh.mode,'existing');
+ await assert.rejects(()=>applySelfhost(fresh,{action:'retry',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({id:'unbounded-invalid-identifier',action:'install',cachedImagesOnly:true,state:'completed',attempt:1})}),{code:'SELFHOST_MANAGER_RESPONSE_INVALID'});
 });
