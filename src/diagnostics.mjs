@@ -30,8 +30,8 @@ export function dockerRead(args,{timeout}){
   resolve(stdout);
  }));
 }
-export async function diagnose(input,{run=dockerRead,clock=Date.now}={}){
- const target=validateTarget(input),start=clock(),deadline=start+TOTAL_MS;
+export async function diagnose(input,{run=dockerRead,clock=()=>performance.now(),observedClock=Date.now}={}){
+ const target=validateTarget(input),start=clock(),observedStartMs=observedClock(),deadline=start+TOTAL_MS;
  const read=async args=>{const remaining=deadline-clock();if(remaining<=0)fail('ENGINE_TIMEOUT');try{return await run(args,{timeout:Math.min(8000,remaining)});}catch(e){fail(e instanceof DiagnosticError?e.code:'ENGINE_OBSERVATION_FAILED');}};
  const census=()=>read(['ps','--all','--no-trunc','--filter',`label=com.docker.compose.project=${target.project}`,'--format','{{.ID}}']);
  const before=parseIds(await census()),records=[];
@@ -46,6 +46,6 @@ export async function diagnose(input,{run=dockerRead,clock=Date.now}={}){
  });
  for(const r of records)if(!target.services.includes(r.service))unexpected++;
  const health=changed||unexpected||services.some(s=>s.containerHealth==='unknown')?'unknown':services.some(s=>s.containerHealth==='unhealthy')?'unhealthy':'healthy';
- return {version:1,scope:'readonly-compose-container-observations',containerHealth:health,applicationReadiness:'not-verified',atomicSnapshot:false,censusChanged:changed,unexpectedContainers:unexpected,observedStartMs:start,observedEndMs:clock(),services};
+ return {version:1,scope:'readonly-compose-container-observations',containerHealth:health,applicationReadiness:'not-verified',atomicSnapshot:false,censusChanged:changed,unexpectedContainers:unexpected,observedStartMs,observedEndMs:observedClock(),services};
 }
 export function safeError(error){return {version:1,state:'observation-failed',code:error instanceof DiagnosticError&&errorCodes.has(error.code)?error.code:'ENGINE_OBSERVATION_FAILED',applicationReadiness:'not-verified'};}
