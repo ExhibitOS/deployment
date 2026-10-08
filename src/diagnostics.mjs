@@ -41,8 +41,8 @@ export async function diagnose(input,{run=dockerRead,clock=Date.now}={}){
  const services=target.services.map(name=>{
   const rs=records.filter(r=>r.service===name);
   if(rs.length!==1)return {service:name,state:rs.length?'duplicate':'missing',containerHealth:'unknown',containers:rs.length};
-  const r=rs[0];const health=r.running&&r.state==='running'&&r.health==='healthy'?'healthy':r.health==='unhealthy'?'unhealthy':'unknown';
-  return {service:name,state:r.state,containerHealth:health,containers:1,id:r.id,imageConfigDigest:r.imageConfigDigest,exitCode:r.exitCode,restarts:r.restarts};
+  const r=rs[0];const health=r.running&&r.state==='running'?(r.health==='healthy'?'healthy':r.health==='unhealthy'?'unhealthy':'unknown'):'unknown';
+  return {service:name,state:r.state,containerHealth:health,observedEngineHealth:r.health??'not-configured',containers:1,id:r.id,imageConfigDigest:r.imageConfigDigest,exitCode:r.exitCode,restarts:r.restarts};
  });
  for(const r of records)if(!target.services.includes(r.service))unexpected++;
  const health=changed||unexpected||services.some(s=>s.containerHealth==='unknown')?'unknown':services.some(s=>s.containerHealth==='unhealthy')?'unhealthy':'healthy';

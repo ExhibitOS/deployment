@@ -14,7 +14,7 @@ test('no containers, missing services, duplicate and changed census never health
  const r=await diagnose({project,services:['api']},{run:async args=>args[0]==='ps'?id+'\n'+id2:JSON.stringify({...record,id:args.at(-1)}),clock:()=>0});assert.equal(r.services[0].state,'duplicate');assert.equal(r.containerHealth,'unknown');
 });
 test('running without health, starting, paused and unexpected scopes are unknown',async()=>{
- for(const patch of [{health:null},{health:'starting'},{state:'paused'},{service:'undeclared'}]){const r=await diagnose({project,services:['api']},{run:runner({...record,...patch}),clock:()=>0});assert.equal(r.containerHealth,'unknown');}
+ for(const patch of [{health:null},{health:'starting'},{state:'paused'},{state:'exited',running:false,health:'unhealthy'},{service:'undeclared'}]){const r=await diagnose({project,services:['api']},{run:runner({...record,...patch}),clock:()=>0});assert.equal(r.containerHealth,'unknown');}
  const r=await diagnose({project,services:['api']},{run:runner({...record,health:'unhealthy'}),clock:()=>0});assert.equal(r.containerHealth,'unhealthy');
 });
 test('strict identities, unknown fields, IDs, digest and unsafe target refuse',()=>{

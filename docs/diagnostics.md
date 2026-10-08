@@ -26,7 +26,8 @@ TLS·DB·storage 연결 검사는 이 결과에 포함되지 않습니다.
 | 3 | observation-failed | 잘못된 입력, 실행 도구·권한·timeout·출력 검사 오류 |
 
 unhealthy와 unknown이 함께 있으면 전체 결과는 unknown이지만 각 서비스의 실제
-unhealthy는 보존됩니다. running만으로 healthy를 가정하지 않습니다. 빈 목록이나
+unhealthy는 보존됩니다. running만으로 healthy를 가정하지 않습니다. 정지된 컨테이너의 과거 health 상태는
+`observedEngineHealth`로 보존하지만 현재 건강 상태는 unknown으로 처리합니다. 빈 목록이나
 없는 환경을 성공으로 처리하지 않습니다. 서비스 최대16개, 관찰 container 최대64개,
 명령별 최대8초/256KiB, 전체 명령 관찰 예산20초입니다. 진단은 재시도하거나 파일을
 쓰기·서비스를 정지·데이터를 지우지 않습니다.
