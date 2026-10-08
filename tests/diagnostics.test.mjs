@@ -32,3 +32,14 @@ test('fixed executable argument arrays, bounded duration, no secret fields reque
  assert.equal(calls.length,3);for(const [args,o]of calls){assert(o.timeout<=8000);assert.equal(typeof args[0],'string');assert(!args.join(' ').includes('.Config.Env'));assert(!args.join(' ').includes('.State.Health.Log'));}
  let t=0;await assert.rejects(diagnose({project,services:['api']},{clock:()=>t+=20001,run:runner()}),/ENGINE_TIMEOUT/);
 });
+
+test('duplicate and escaped field names refuse before accepting last JSON value',()=>{
+ const text=JSON.stringify(record);assert.throws(()=>parseInspection(text.replace('{"id":','{"id":"'+id2+'","id":'),id,project),/ENGINE_OUTPUT_INVALID/);
+ assert.throws(()=>parseInspection(text.replace('"project":','"pr\\u006fject":"other","project":'),id,project),/ENGINE_OUTPUT_INVALID/);
+});
+test('late last census cannot return health after total monotonic deadline',async()=>{
+ let time=0,count=0;
+ await assert.rejects(diagnose({project,services:['api']},{clock:()=>time,run:async args=>{
+  if(++count===3)time=20001;return args[0]==='ps'?id:JSON.stringify(record);
+ }}),/ENGINE_TIMEOUT/);
+});

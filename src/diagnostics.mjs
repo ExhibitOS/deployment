@@ -21,6 +21,9 @@ export function parseIds(text){
 export function parseInspection(text,id,project){
  if(typeof text!=='string'||Buffer.byteLength(text)>MAX_BYTES)fail('ENGINE_OUTPUT_INVALID');
  let r;try{r=JSON.parse(text);}catch{fail('ENGINE_OUTPUT_INVALID');}
+ const tokens=text.match(/"(?:[^"\\]|\\.)*"\s*:/g)??[];
+ if(tokens.length!==9)fail('ENGINE_OUTPUT_INVALID');
+ for(const key of keys.split(','))if(tokens.filter(t=>t.replace(/\s*:/,'')===JSON.stringify(key)).length!==1)fail('ENGINE_OUTPUT_INVALID');
  if(!r||Array.isArray(r)||Object.keys(r).sort().join(',')!==keys||r.id!==id||r.project!==project||typeof r.service!=='string'||!nameRE.test(r.service)||typeof r.imageConfigDigest!=='string'||!/^sha256:[a-f0-9]{64}$/.test(r.imageConfigDigest)||typeof r.running!=='boolean'||!states.has(r.state)||!(r.health===null||['healthy','unhealthy','starting'].includes(r.health))||!Number.isInteger(r.exitCode)||r.exitCode<0||r.exitCode>2147483647||!Number.isSafeInteger(r.restarts)||r.restarts<0)fail('ENGINE_OUTPUT_INVALID');
  return r;
 }
@@ -32,7 +35,7 @@ export function dockerRead(args,{timeout}){
 }
 export async function diagnose(input,{run=dockerRead,clock=()=>performance.now(),observedClock=Date.now}={}){
  const target=validateTarget(input),start=clock(),observedStartMs=observedClock(),deadline=start+TOTAL_MS;
- const read=async args=>{const remaining=deadline-clock();if(remaining<=0)fail('ENGINE_TIMEOUT');try{return await run(args,{timeout:Math.min(8000,remaining)});}catch(e){fail(e instanceof DiagnosticError?e.code:'ENGINE_OBSERVATION_FAILED');}};
+ const read=async args=>{const remaining=deadline-clock();if(remaining<=0)fail('ENGINE_TIMEOUT');try{const result=await run(args,{timeout:Math.min(8000,remaining)});if(clock()>deadline)fail('ENGINE_TIMEOUT');return result;}catch(e){fail(e instanceof DiagnosticError?e.code:'ENGINE_OBSERVATION_FAILED');}};
  const census=()=>read(['ps','--all','--no-trunc','--filter',`label=com.docker.compose.project=${target.project}`,'--format','{{.ID}}']);
  const before=parseIds(await census()),records=[];
  for(const id of before)records.push(parseInspection(await read(['inspect','--format',template,id]),id,target.project));
@@ -46,6 +49,7 @@ export async function diagnose(input,{run=dockerRead,clock=()=>performance.now()
  });
  for(const r of records)if(!target.services.includes(r.service))unexpected++;
  const health=changed||unexpected||services.some(s=>s.containerHealth==='unknown')?'unknown':services.some(s=>s.containerHealth==='unhealthy')?'unhealthy':'healthy';
+ if(clock()>deadline)fail('ENGINE_TIMEOUT');
  return {version:1,scope:'readonly-compose-container-observations',containerHealth:health,applicationReadiness:'not-verified',atomicSnapshot:false,censusChanged:changed,unexpectedContainers:unexpected,observedStartMs,observedEndMs:observedClock(),services};
 }
 export function safeError(error){return {version:1,state:'observation-failed',code:error instanceof DiagnosticError&&errorCodes.has(error.code)?error.code:'ENGINE_OBSERVATION_FAILED',applicationReadiness:'not-verified'};}
