@@ -22,7 +22,7 @@ async function fixture(t){
 test('plan is read-only; explicit cached Install uses pinned child environment and consumes genuine capability',async t=>{
  const f=await fixture(t),before=await readFile(join(f.root,'runtime.env'));const plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
  assert.equal(plan.mode,'fresh');assert.equal(JSON.stringify(plan).includes('never-output'),false);
- let calls=0;const result=await applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async(path,args,env)=>{calls++;assert.equal(path,f.input.managerPath);assert.deepEqual(args.slice(2),['install-existing-images','--preserve-volumes','--existing-images-only']);assert.equal(env.DOCKER_HOST,'unix:///synthetic/docker.sock');assert.equal(env.DOCKER_CONTEXT,undefined);assert.equal(env.DOCKER_TLS_VERIFY,undefined);return JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1,errorCode:null});}});
+ let calls=0;const result=await applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async(path,args,env)=>{calls++;assert.equal(path,f.input.managerPath);assert.deepEqual(args.slice(2),['install-existing-images','--preserve-volumes','--existing-images-only']);assert.equal(env.DOCKER_HOST,'unix:///synthetic/docker.sock');assert.equal(env.DOCKER_CONTEXT,undefined);assert.equal(env.DOCKER_TLS_VERIFY,undefined);const result={id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1,errorCode:null};await writeFile(join(f.root,'jobs.json'),JSON.stringify([result]),{mode:0o600});return JSON.stringify(result);}});
  assert.equal(result.state,'completed');assert.equal(calls,1);assert.deepEqual(await readFile(join(f.root,'runtime.env')),before);
  await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true}),{code:'SELFHOST_CONSENT_REQUIRED'});
  assert.ok(f.calls.filter(c=>c.args.includes('ps')).every(c=>c.args[0]==='--host'));
@@ -50,7 +50,7 @@ test('context drift and private binding tamper refuse before CLI; no old receipt
 
 test('completed child result cannot bless configuration drift or an unbounded job identifier',async t=>{
  const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
- await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>{await writeFile(join(f.root,'runtime.env'),'changed-during-child\n');return JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1});}}),{code:'SELFHOST_SOURCE_CHANGED'});
+ await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>{await writeFile(join(f.root,'runtime.env'),'changed-during-child\n');const result={id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1};await writeFile(join(f.root,'jobs.json'),JSON.stringify([result]),{mode:0o600});return JSON.stringify(result);}}),{code:'SELFHOST_SOURCE_CHANGED'});
  assert.equal(JSON.stringify(plan).includes('changed-during-child'),false);
 });
 
@@ -58,6 +58,27 @@ test('malformed or downgraded Install job response is refused while private bind
  const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
  await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:false,state:'completed',attempt:1})}),{code:'SELFHOST_MANAGER_RESPONSE_INVALID'});
  const binding=JSON.parse((await readFile(join(f.root,'deployment-binding.json'))).toString());assert.equal(binding.project,'exhibitos-fixture');
+ await writeFile(join(f.root,'jobs.json'),JSON.stringify([{id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'failed',attempt:1}]),{mode:0o600});
  const fresh=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});assert.equal(fresh.mode,'existing');
  await assert.rejects(()=>applySelfhost(fresh,{action:'retry',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({id:'unbounded-invalid-identifier',action:'install',cachedImagesOnly:true,state:'completed',attempt:1})}),{code:'SELFHOST_MANAGER_RESPONSE_INVALID'});
+});
+
+test('normal Install retry refuses before child; guarded cached retry pins target and durable completion',async t=>{
+ const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({id:'invalid',action:'install',state:'failed',attempt:1})}),{code:'SELFHOST_MANAGER_RESPONSE_INVALID'});
+ const job={id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:false,state:'failed',attempt:1};await writeFile(join(f.root,'jobs.json'),JSON.stringify([job]),{mode:0o600});
+ const normal=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ await assert.rejects(()=>applySelfhost(normal,{action:'retry',preserveVolumes:true,existingImagesOnly:true},{managerRun:()=>assert.fail('normal install must not acquire')}),{code:'SELFHOST_RETRY_POLICY_REQUIRED'});
+ job.cachedImagesOnly=true;await writeFile(join(f.root,'jobs.json'),JSON.stringify([job]));
+ const cached=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ const result=await applySelfhost(cached,{action:'retry',preserveVolumes:true,existingImagesOnly:true},{managerRun:async(path,args)=>{assert.deepEqual(args.slice(2),['retry-existing-images',job.id,'1','--preserve-volumes','--existing-images-only']);const done={...job,state:'completed',attempt:2};await writeFile(join(f.root,'jobs.json'),JSON.stringify([job,done]));return JSON.stringify(done);}});assert.equal(result.attempt,2);assert.equal(result.jobId,job.id);
+});
+test('private latest retry record drift never starts child and fabricated durable result is refused',async t=>{
+ const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({id:'invalid'})}),{code:'SELFHOST_MANAGER_RESPONSE_INVALID'});
+ const job={id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'failed',attempt:1};await writeFile(join(f.root,'jobs.json'),JSON.stringify([job]),{mode:0o600});
+ const stale=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});await writeFile(join(f.root,'jobs.json'),JSON.stringify([{...job,attempt:2}]));
+ await assert.rejects(()=>applySelfhost(stale,{action:'retry',preserveVolumes:true,existingImagesOnly:true},{managerRun:()=>assert.fail('changed target cannot run')}),{code:'SELFHOST_SOURCE_CHANGED'});
+ const fresh=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ await assert.rejects(()=>applySelfhost(fresh,{action:'retry',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>JSON.stringify({...job,state:'completed',attempt:3})}),{code:'SELFHOST_JOB_CHANGED'});
 });
