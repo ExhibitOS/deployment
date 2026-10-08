@@ -2,7 +2,7 @@
 
 [처음으로](../README.md) · [확인 기록 양식](preflight-record-template.md) · [공개 OED 명세](https://github.com/ExhibitOS/spec/blob/8ee5741860b626448dcba0c82657de6621e1c058/oed/v1/README.md)
 
-현재 사용할 수 있는 것은 **OED 문서 형식 검사**입니다. 이 저장소의
+현재 사용할 수 있는 것은 **OED 문서 형식 검사**와 별도의 [읽기 전용 컨테이너 진단](diagnostics.md)입니다. 이 저장소의
 plan/apply/status/rollback 명령, 서버 설치 프로그램과 provider adapter는
 아직 구현되지 않았습니다. 아래 절차는 준비 상태를 정리하며 배포를 실행하지 않습니다.
 

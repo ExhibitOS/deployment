@@ -21,7 +21,7 @@ spec의 OED와 공개 platform OCI image를 사용하고 manager가 adapter를 �
 
 ## 검증과 완료
 
-현재 제품 구현, CI, test suite와 toolchain은 없다. 없는 build/test가 통과했다고 보고하지 않는다. T00-02에서 실제 검사 명령을 README에 추가한 뒤 각 변경에 해당하는 검사를 수행한다. 계획된 검사: secret-free dry-run/plan, 건강 상태 검사, 재실행, 실패한 migration과 rollback, provider 없이 Generic SSH 흐름을 검증한다.
+읽기 전용 Compose 진단 기반은 Node24.21.0과 builtin-only `npm test`로 검사한다. 설치·배포·provider 실행이나 production CI는 아직 없으며, 미실행 검사를 통과로 보고하지 않는다. T00-02에서 실제 검사 명령을 README에 추가한 뒤 각 변경에 해당하는 검사를 수행한다. 계획된 검사: secret-free dry-run/plan, 건강 상태 검사, 재실행, 실패한 migration과 rollback, provider 없이 Generic SSH 흐름을 검증한다.
 
 문서 변경은 `git diff --check`, 링크/예제와 tracked tree를 확인한다. 코드가 추가되면 정상·실패·권한·재시도 경로를 task acceptance에 맞춰 검증하고 환경·명령·결과·제한을 남긴다. 기기·서명 검증은 실물 증거 없이 완료 처리하지 않는다.
 

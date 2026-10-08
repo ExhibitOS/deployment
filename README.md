@@ -4,7 +4,18 @@ Deployment adapters. OCI/compose, Generic SSH, DNS/TLS, OpenTofu와 provider ada
 
 ## 현재 상태
 
-2026-10-03 기준 README·에이전트 작업 규칙·운영자 준비 확인 문서가 있는 준비 단계다. 제품 코드, 실행 환경, dependency manifest, CI, 자동 테스트와 설치 파일은 아직 없다. 아래 기능과 검사는 계획이며 구현 완료를 뜻하지 않는다.
+읽기 전용 Compose 컨테이너 진단 도구를 구현했습니다. Node24.21.0에서
+`npm test`로 경계 검사를 실행합니다. 외부 package와 설치 단계는 없습니다.
+서비스 설치·변경, SSH/provider 배포, DNS/TLS, application readiness 검증은 아직
+구현되지 않았습니다. 진단 성공은 전체 T10-01 또는 운영 배포 완료를 뜻하지 않습니다.
+
+```sh
+node bin/diagnose.mjs --project exhibitos-example --services platform,database
+```
+
+`--services`에는 필요한 서비스 전부를 명시합니다. 실제 사용 중인 Compose
+project 이름을 사용하며 예제 project는 설치 대상이 아닙니다.
+[진단 결과와 한계](docs/diagnostics.md)를 읽어 실행 도구·누락·건강 상태를 구분하세요.
 
 ## 운영자가 시작할 곳
 
@@ -24,7 +35,7 @@ T10-01 → T10-02 → T10-03.
 
 T00-02에서 toolchain·지원 환경·build/lint/typecheck/test 명령을 확정하고 실제 설정을 추가한다. 이후 task마다 코드·오류 검사·사용법과 검증 증거를 함께 작성한다. secret-free dry-run/plan, 건강 상태 검사, 재실행, 실패한 migration과 rollback, provider 없이 Generic SSH 흐름을 검증한다.
 
-현재 실행 가능한 제품 build/test 명령은 없다. 이 문서 변경은 `git diff --check`와 tracked tree/의존 경계 검토로 확인한다.
+진단 검사: `npm test`. 문서 검사는 `git diff --check`를 사용합니다. 진단은 Docker CLI 읽기 명령만 실행하며 제품 설치·업데이트 또는 credential 조회는 수행하지 않습니다.
 
 ## 기여와 보안 보고
 
@@ -38,4 +49,4 @@ T00-02에서 toolchain·지원 환경·build/lint/typecheck/test 명령을 확�
 외부 코드·package·폰트·이미지·작품과 함께 배포하는 platform은 각각 원래 조건을 유지합니다.
 원본 LICENSE와 관련 copyright·NOTICE를 보존하고 수정 파일에는 변경 고지를 남깁니다.
 이 라이선스는 상표 허락이나 사용자 작품의 display/export 권한을 부여하지 않습니다.
-현재 제품 코드·dependency·배포 image가 없는 준비 단계이며, 추가 시 출처와 재배포 조건을 확인합니다.
+진단 코드에는 외부 dependency가 없습니다. 배포 image·provider 실행은 구현되지 않았으며, 도입 시 출처와 재배포 조건을 확인합니다.
