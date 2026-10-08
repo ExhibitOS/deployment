@@ -1,4 +1,5 @@
 // Copyright 2026 ExhibitOS contributors. SPDX-License-Identifier: Apache-2.0
+import {isDeepStrictEqual} from 'node:util';
 import {validateLocalSelfhostProfile} from './local-selfhost-profile.mjs';
 import {execFile} from 'node:child_process';
 import {constants} from 'node:fs';
@@ -105,7 +106,7 @@ export async function applySelfhost(plan,{action,preserveVolumes,existingImagesO
   const result=boundedJSON(await managerRun(lease.managerPath,args,engine.managerEnvironment(),{timeout:Math.min(120000,remaining())}),262144);
   if(typeof result?.id!=='string'||!uuidRE.test(result.id)||!['completed','failed'].includes(result.state)||!Number.isInteger(result.attempt)||result.attempt<1||result.attempt>4294967295||!['install','start','stop','restart'].includes(result.action)||(action!=='retry'&&result.action!==action)||(result.action==='install'&&result.cachedImagesOnly!==true))fail('SELFHOST_MANAGER_RESPONSE_INVALID');
   if(retry&&(result.id!==retry.id||result.attempt!==retry.attempt+1||result.action!==retry.action||Boolean(result.cachedImagesOnly)!==Boolean(retry.cachedImagesOnly)))fail('SELFHOST_JOB_CHANGED');
-  const durable=(await jobSnapshot(root)).jobs.at(-1);if(!durable||JSON.stringify(durable)!==JSON.stringify(result))fail('SELFHOST_JOB_CHANGED');
+  const durable=(await jobSnapshot(root)).jobs.at(-1);if(!durable||!isDeepStrictEqual(durable,result))fail('SELFHOST_JOB_CHANGED');
   await engine.verify();
   if(!identity(lease.rootStat,await privateDirectory(root))||JSON.stringify(boundedJSON((await pinnedFile(join(root,recordName),65536)).bytes.toString(),65536))!==JSON.stringify(binding))fail('SELFHOST_BINDING_CHANGED');
   for(const [name,path] of [['oed',lease.oedPath],['manifest',join(root,'bundle/manifest.json')],['compose',join(root,'bundle/compose.yaml')],['environment',join(root,'runtime.env')],['manager',lease.managerPath]])if((await pinnedFile(path,name==='manager'?32*1024*1024:65536,{privateMode:name!=='manager',executable:name==='manager'})).digest!==lease.inputs[name].digest)fail('SELFHOST_SOURCE_CHANGED');

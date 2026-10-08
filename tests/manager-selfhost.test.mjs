@@ -99,3 +99,15 @@ test('approved manifest and Compose bytes must still match the closed local gene
  const f=await fixture(t),mp=join(f.root,'bundle/manifest.json'),m=JSON.parse((await readFile(mp)).toString());m.unknown=true;const mb=JSON.stringify(m);await writeFile(mp,mb);f.input.approved.manifestSha256=digest(mb);
  await assert.rejects(()=>planSelfhost(f.input,{run:()=>assert.fail('invalid manifest before engine'),getEnvironment:()=>f.env}),{code:'SELFHOST_BUNDLE_MISMATCH'});
 });
+
+test('durable job matches semantic fields across actual CLI key ordering and refuses changed content',async t=>{
+ for(const tamper of [false,true]){
+  const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+  const work=()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>{
+   const job={id:'70000000-0000-4000-8000-000000000002',cachedImagesOnly:true,action:'install',state:'completed',attempt:1,progress:100,createdAt:'2026-10-08T00:00:00Z',updatedAt:'2026-10-08T00:00:00Z',errorCode:null,guidance:null};
+   await writeFile(join(f.root,'jobs.json'),JSON.stringify([job]),{mode:0o600});
+   const sorted=Object.fromEntries(Object.entries(job).sort(([a],[b])=>a.localeCompare(b)));if(tamper)sorted.guidance='changed';return JSON.stringify(sorted);
+  }});
+  if(tamper)await assert.rejects(work,{code:'SELFHOST_JOB_CHANGED'});else assert.equal((await work()).state,'completed');
+ }
+});
