@@ -1,4 +1,5 @@
 // Copyright 2026 ExhibitOS contributors. SPDX-License-Identifier: Apache-2.0
+import {createHash} from 'node:crypto';
 import {DiagnosticError} from './diagnostics.mjs';
 import {boundedJSON} from './bounded-json.mjs';
 const fail=code=>{throw new DiagnosticError(code);};
@@ -28,6 +29,8 @@ export async function bindLocalEngine(run,getEnvironment=()=>process.env){
  for(const key of ['DOCKER_TLS','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH'])delete pinnedEnvironment[key];
  Object.freeze(pinnedEnvironment);
  return Object.freeze({
+  endpointDigest:createHash('sha256').update(selected.endpoint).digest('hex'),
+  managerEnvironment:()=>Object.freeze({...pinnedEnvironment,DOCKER_HOST:selected.endpoint}),
   run:(args,options)=>run(['--host',selected.endpoint,...args],{...options,env:pinnedEnvironment}),
   verify:async()=>{
    if(JSON.stringify(selection(getEnvironment()))!==JSON.stringify(beforeSelection))fail('ENGINE_SELECTION_CHANGED');
