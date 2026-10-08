@@ -67,3 +67,9 @@ HTTP503의 유효한 unavailable 응답이나 포트/상태 변경은 종료2입
 준비 상태는 해당 순간의 애플리케이션 보고입니다. 원자적 snapshot, 서명된
 릴리스 진위, Realtime, TLS, CPU/RAM/disk/queue, 전체 복구 또는 운영 배포의
 완료 증거가 아닙니다. 이전 기본 모드는 HTTP를 호출하지 않습니다.
+
+## Local engine requirement for HTTP observations
+
+Optional Platform HTTP readiness refuses TCP (including localhost), SSH and other remote Docker transports before any container census or HTTP request. It resolves the effective selection in Docker order: nonempty `DOCKER_CONTEXT`, then `DOCKER_HOST`, then the current context. Context discovery reads only the selected Docker endpoint; no TLS/credential fields are requested. Only bounded Unix socket or local named-pipe endpoints are admitted. Unsupported context names/transports fail closed.
+
+All optional-mode Docker observations use the resolved explicit host and a frozen environment, so changing the current context cannot redirect an intermediate census/inspection. Selection environment and context endpoint are reobserved immediately before HTTP and after the final census; drift refuses positive readiness. This is a point observation, not an atomic lock on Docker configuration. The socket/named-pipe daemon and any local proxy are trusted local infrastructure; a local proxy forwarding elsewhere is not cryptographically detected. No signed engine identity or remote-engine readiness is qualified. Raw endpoint paths, selection environment and credential metadata do not enter the diagnostic receipt. Container-only mode remains independent of this local HTTP requirement.

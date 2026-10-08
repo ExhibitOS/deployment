@@ -2,6 +2,7 @@
 import {request} from 'node:http';
 import {diagnose,dockerRead,DiagnosticError,parseIds,validateTarget} from './diagnostics.mjs';
 import {boundedJSON} from './bounded-json.mjs';
+import {bindLocalEngine} from './engine-locality.mjs';
 const MAX_BODY=16384,TOTAL_MS=20000,serviceNames=['platform','api','database','web','storage'];
 const portTemplate='{ "id":{{json .Id}}, "project":{{json (index .Config.Labels "com.docker.compose.project")}}, "service":{{json (index .Config.Labels "com.docker.compose.service")}}, "imageConfigDigest":{{json .Image}}, "running":{{json .State.Running}}, "state":{{json .State.Status}}, "restarts":{{json .RestartCount}}, "bindings":{{json (index .NetworkSettings.Ports "8080/tcp")}} }';
 const fail=code=>{throw new DiagnosticError(code);};
@@ -34,17 +35,21 @@ export function readLoopbackReadiness(binding,{timeout}){
   timer=setTimeout(()=>{finish('APPLICATION_TIMEOUT');req.destroy();},timeout);req.on('error',()=>finish('APPLICATION_UNAVAILABLE'));req.end();
  });
 }
-export async function diagnoseApplication(input,{service,run=dockerRead,readHTTP=readLoopbackReadiness,clock=()=>performance.now(),observedClock=Date.now}={}){
+export async function diagnoseApplication(input,{service,run=dockerRead,readHTTP=readLoopbackReadiness,clock=()=>performance.now(),observedClock=Date.now,getEnvironment=()=>process.env}={}){
  const target=validateTarget(input);if(typeof service!=='string'||!target.services.includes(service))fail('TARGET_INVALID');
  const deadline=clock()+TOTAL_MS;const remaining=()=>{const n=deadline-clock();if(n<=0)fail('ENGINE_TIMEOUT');return n;};
- const boundedRun=async(args,o)=>{const timeout=Math.min(o?.timeout??8000,remaining());const out=await run(args,{timeout});remaining();return out;};
+ const engineRun=async(args,o)=>{const timeout=Math.min(o?.timeout??8000,remaining());const out=await run(args,{...o,timeout});remaining();return out;};
+ const local=await bindLocalEngine(engineRun,getEnvironment);
+ const boundedRun=(args,o)=>local.run(args,o);
  const baseline=await diagnose(target,{run:boundedRun,clock,observedClock});
  const result=(status,observation)=>{remaining();return {...baseline,scope:'readonly-compose-and-bound-platform-readiness-observations',applicationReadiness:status,applicationObservation:observation,observedEndMs:observedClock()};};
  const s=baseline.services.find(s=>s.service===service);if(baseline.censusChanged||baseline.unexpectedContainers||s?.containers!==1||s.state!=='running')return result('unknown',{status:'not-observed',reason:'service-binding-unverified'});
  const expected={...s,project:target.project};const inspect=async()=>parsePortInspection(await boundedRun(['inspect','--format',portTemplate,s.id]),expected);
  const before=await inspect();if(!before)return result('unknown',{status:'not-observed',reason:'single-loopback-8080-binding-required'});
+ await local.verify();
  const observedStartMs=observedClock(),http=await readHTTP(before,{timeout:Math.min(2000,remaining())});remaining();const observation=parseReadiness(http);
  const after=await inspect(),ids=parseIds(await boundedRun(['ps','--all','--no-trunc','--filter',`label=com.docker.compose.project=${target.project}`,'--format','{{.ID}}']));remaining();
+ await local.verify();
  const known=baseline.services.filter(s=>s.containers===1).map(s=>s.id).sort();if(JSON.stringify(before)!==JSON.stringify(after)||known.join(',')!==ids.join(','))return {...result('unknown',{status:'not-observed',reason:'binding-or-census-changed'}),censusChanged:true,containerHealth:'unknown'};
- return result(observation.status,{...observation,endpoint:`http://127.0.0.1:${before.port}/api/v1/readiness`,service,containerId:s.id,imageConfigDigest:s.imageConfigDigest,binding:before,observedStartMs,observedEndMs:observedClock(),atomicSnapshot:false,signedReleaseAuthenticity:'not-verified',realtimeAndTLS:'not-verified'});
+ return result(observation.status,{...observation,endpoint:`http://127.0.0.1:${before.port}/api/v1/readiness`,service,containerId:s.id,imageConfigDigest:s.imageConfigDigest,binding:before,observedStartMs,observedEndMs:observedClock(),atomicSnapshot:false,engineLocality:'observed-local-transport-trusted-daemon',signedReleaseAuthenticity:'not-verified',realtimeAndTLS:'not-verified'});
 }

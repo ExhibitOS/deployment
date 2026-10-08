@@ -2,7 +2,7 @@
 import {execFile} from 'node:child_process';
 const MAX_BYTES=262144, MAX_CONTAINERS=64, TOTAL_MS=20000;
 const idRE=/^[a-f0-9]{64}$/, nameRE=/^[a-z0-9][a-z0-9_-]{0,47}$/;
-const errorCodes=new Set(['USAGE','TARGET_INVALID','ENGINE_OUTPUT_INVALID','ENGINE_UNAVAILABLE','ENGINE_TIMEOUT','ENGINE_OBSERVATION_FAILED','APPLICATION_BINDING_UNVERIFIED','APPLICATION_RESPONSE_INVALID','APPLICATION_TIMEOUT','APPLICATION_UNAVAILABLE']);
+const errorCodes=new Set(['USAGE','TARGET_INVALID','ENGINE_OUTPUT_INVALID','ENGINE_UNAVAILABLE','ENGINE_TIMEOUT','ENGINE_OBSERVATION_FAILED','APPLICATION_BINDING_UNVERIFIED','APPLICATION_RESPONSE_INVALID','APPLICATION_TIMEOUT','APPLICATION_UNAVAILABLE','ENGINE_LOCALITY_UNVERIFIED','ENGINE_SELECTION_CHANGED']);
 const states=new Set(['created','restarting','running','removing','paused','exited','dead']);
 const keys=['id','project','service','imageConfigDigest','running','state','health','exitCode','restarts'].sort().join(',');
 const template='{ "id":{{json .Id}}, "project":{{json (index .Config.Labels "com.docker.compose.project")}}, "service":{{json (index .Config.Labels "com.docker.compose.service")}}, "imageConfigDigest":{{json .Image}}, "running":{{json .State.Running}}, "state":{{json .State.Status}}, "health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}, "exitCode":{{json .State.ExitCode}}, "restarts":{{json .RestartCount}} }';
@@ -27,8 +27,8 @@ export function parseInspection(text,id,project){
  if(!r||Array.isArray(r)||Object.keys(r).sort().join(',')!==keys||r.id!==id||r.project!==project||typeof r.service!=='string'||!nameRE.test(r.service)||typeof r.imageConfigDigest!=='string'||!/^sha256:[a-f0-9]{64}$/.test(r.imageConfigDigest)||typeof r.running!=='boolean'||!states.has(r.state)||!(r.health===null||['healthy','unhealthy','starting'].includes(r.health))||!Number.isInteger(r.exitCode)||r.exitCode<0||r.exitCode>2147483647||!Number.isSafeInteger(r.restarts)||r.restarts<0)fail('ENGINE_OUTPUT_INVALID');
  return r;
 }
-export function dockerRead(args,{timeout}){
- return new Promise((resolve,reject)=>execFile('docker',args,{shell:false,windowsHide:true,timeout,maxBuffer:MAX_BYTES,encoding:'utf8'},(err,stdout)=>{
+export function dockerRead(args,{timeout,env}){
+ return new Promise((resolve,reject)=>execFile('docker',args,{shell:false,windowsHide:true,timeout,env,maxBuffer:MAX_BYTES,encoding:'utf8'},(err,stdout)=>{
   if(err)return reject(new DiagnosticError(err.code==='ENOENT'?'ENGINE_UNAVAILABLE':err.killed?'ENGINE_TIMEOUT':'ENGINE_OBSERVATION_FAILED'));
   resolve(stdout);
  }));
