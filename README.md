@@ -6,7 +6,7 @@ Deployment adapters. OCI/compose, Generic SSH, DNS/TLS, OpenTofu와 provider ada
 
 읽기 전용 Compose 컨테이너 진단 도구를 구현했습니다. Node24.21.0에서
 `npm test`로 경계 검사를 실행합니다. 외부 package와 설치 단계는 없습니다.
-명시적으로 요청하면 관찰한 localhost 포트에서 Platform HTTP readiness를 확인합니다.
+명시적으로 요청하면 확인된 로컬 Docker 연결과 관찰한 localhost 포트에서 Platform HTTP readiness를 확인합니다. 원격 Docker 연결의 HTTP 검사는 거부합니다.
 서비스 설치·변경, SSH/provider 배포와 DNS/TLS는 아직 구현되지 않았습니다. 진단 성공은 전체 T10-01 또는 운영 배포 완료를 뜻하지 않습니다.
 
 ```sh

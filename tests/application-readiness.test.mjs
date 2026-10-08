@@ -8,7 +8,10 @@ const record={id,project,service:'platform',imageConfigDigest,running:true,state
 const ports={id,project,service:'platform',imageConfigDigest,running:true,state:'running',restarts:0,bindings:[{HostIp:'127.0.0.1',HostPort:'13200'}]};
 const document=(ready=true)=>({schemaVersion:'1.0.0-draft.1',protocolVersion:'1',platformVersion:'0.1.0',ready,services:['platform','api','database','web','storage'].map(name=>({name,status:ready||!['platform','database'].includes(name)?'ready':'unavailable'}))});
 const response=(ready=true)=>({status:ready?200:503,body:JSON.stringify(document(ready)),contentType:'application/json; charset=utf-8',cacheControl:'no-store'});
-const options=(patch={})=>({service:'platform',clock:()=>0,observedClock:()=>100,run:async args=>args[0]==='ps'?id:JSON.stringify(args[2].includes('bindings')?ports:record),readHTTP:async()=>response(),...patch});
+const options=(patch={})=>{
+ const engine=patch.run??(async args=>args[0]==='ps'?id:JSON.stringify(args[2].includes('bindings')?ports:record));
+ return {service:'platform',clock:()=>0,observedClock:()=>100,readHTTP:async()=>response(),...patch,getEnvironment:()=>({DOCKER_HOST:'unix:///synthetic-docker.sock'}),run:async(args,o)=>engine(args.slice(2),o)};
+};
 test('bounded JSON rejects duplicate decoded keys, trailing/deep/node/big/nonfinite/prototype inputs',()=>{
  assert.equal(boundedJSON('{"x":[1,true,null,"escaped\\n"]}').x[0],1);
  for(const text of ['{"x":1,"x":2}','{"x":1,"\\u0078":2}','{"__proto__":{}}','{}{}','{"x":1e999}','['.repeat(14)+'0'+']'.repeat(14),'['+Array(2049).fill('0').join(',')+']','"'+'x'.repeat(16384)+'"'])assert.throws(()=>boundedJSON(text));
