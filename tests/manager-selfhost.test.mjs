@@ -111,3 +111,21 @@ test('durable job matches semantic fields across actual CLI key ordering and ref
   if(tamper)await assert.rejects(work,{code:'SELFHOST_JOB_CHANGED'});else assert.equal((await work()).state,'completed');
  }
 });
+
+test('explicit local IPAM binds canonical subnet/gateway, exact Compose and read-only CLI capability',async t=>{
+ for(const mode of ['valid','gateway','unknown','compose','old-cli']){
+  const f=await fixture(t),mp=join(f.root,'bundle/manifest.json'),cp=join(f.root,'bundle/compose.yaml');
+  const m=JSON.parse(await readFile(mp,'utf8')),c=JSON.parse(await readFile(cp,'utf8'));
+  m.explicitLocalNetwork={mode:'explicit-rfc1918-v1',subnet:'10.240.0.0/28',gateway:'10.240.0.1'};
+  c.networks.default.ipam={config:[{subnet:m.explicitLocalNetwork.subnet,gateway:m.explicitLocalNetwork.gateway}]};
+  if(mode==='gateway')m.explicitLocalNetwork.gateway='10.240.0.2';
+  if(mode==='unknown')m.explicitLocalNetwork.extra=true;
+  if(mode==='compose')c.networks.default.ipam.config[0].gateway='10.240.0.2';
+  const cb=JSON.stringify(c);m.composeSha256=digest(cb);const mb=JSON.stringify(m);await writeFile(cp,cb);await writeFile(mp,mb);
+  f.input.approved.composeSha256=digest(cb);f.input.approved.manifestSha256=digest(mb);
+  const executable=mode==='old-cli'?'#!/bin/sh\nexit 2\n':'#!/bin/sh\nprintf \'%s\\n\' \'{"version":1,"mode":"explicit-rfc1918-v1","readOnlySelector":true}\'\n';
+  await writeFile(f.input.managerPath,executable,{mode:0o700});f.input.approved.managerSha256=digest(executable);
+  if(mode==='valid'){const p=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});assert.equal(p.profile,'manager-local-selfhost-v2-explicit-ipam');assert.equal(p.explicitLocalNetwork.subnet,'10.240.0.0/28');}
+  else await assert.rejects(()=>planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env}),{code:mode==='compose'?'SELFHOST_COMPOSE_PROFILE_MISMATCH':mode==='old-cli'?'SELFHOST_MANAGER_FEATURE_REQUIRED':'SELFHOST_NETWORK_POLICY_INVALID'});
+ }
+});

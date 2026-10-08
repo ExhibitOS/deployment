@@ -65,11 +65,12 @@ export async function planSelfhost({root,oedPath,managerPath,approved},{run=dock
   for(const [name,digest] of [['oed',approved.oedSha256],['manifest',approved.manifestSha256],['compose',approved.composeSha256],['manager',approved.managerSha256]])if(inputs[name].digest!==digest)fail('SELFHOST_APPROVAL_MISMATCH');
   const oed=boundedJSON(inputs.oed.bytes.toString(),65536),manifest=boundedJSON(inputs.manifest.bytes.toString(),65536),compose=boundedJSON(inputs.compose.bytes.toString(),65536);
   validateLocalSelfhostProfile(oed,manifest,compose,inputs.compose.digest);
+  if(manifest.explicitLocalNetwork!==undefined){const capability=boundedJSON(await runManager(managerPath,['--local-network-capabilities'],Object.freeze({...getEnvironment()}),{timeout:5000}).catch(()=>fail('SELFHOST_MANAGER_FEATURE_REQUIRED')),4096);if(!closed(capability,['version','mode','readOnlySelector'])||capability.version!==1||capability.mode!=='explicit-rfc1918-v1'||capability.readOnlySelector!==true)fail('SELFHOST_MANAGER_FEATURE_REQUIRED');}
   const state=await managerState(root),jobs=(await jobSnapshot(root)).jobs;
   const budget={deadline:performance.now()+20000};
   const budgetedRun=async(args,options={})=>{const left=budget.deadline-performance.now();if(left<=0)fail('SELFHOST_TIME_QUOTA');const text=await run(args,{...options,timeout:Math.min(8000,left)});if(performance.now()>budget.deadline)fail('SELFHOST_TIME_QUOTA');return text;};
   const engine=await bindLocalEngine(budgetedRun,getEnvironment),observed=await census(engine,manifest.projectName);await engine.verify();
-  const binding={version:1,profile:'manager-local-selfhost-v1',rootDigest:sha(root),project:manifest.projectName,endpointDigest:engine.endpointDigest,...approved};
+  const binding={version:1,profile:manifest.explicitLocalNetwork===undefined?'manager-local-selfhost-v1':'manager-local-selfhost-v2-explicit-ipam',...(manifest.explicitLocalNetwork===undefined?{}:{explicitLocalNetwork:manifest.explicitLocalNetwork}),rootDigest:sha(root),project:manifest.projectName,endpointDigest:engine.endpointDigest,...approved};
   let current=null;
   try{current=boundedJSON((await pinnedFile(join(root,recordName),65536)).bytes.toString(),65536);}catch(error){if(error.code!=='ENOENT')throw error;}
   if(current&&JSON.stringify(current)!==JSON.stringify(binding))fail('SELFHOST_BINDING_CHANGED');
