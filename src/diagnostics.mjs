@@ -2,7 +2,7 @@
 import {execFile} from 'node:child_process';
 const MAX_BYTES=262144, MAX_CONTAINERS=64, TOTAL_MS=20000;
 const idRE=/^[a-f0-9]{64}$/, nameRE=/^[a-z0-9][a-z0-9_-]{0,47}$/;
-const errorCodes=new Set(['USAGE','TARGET_INVALID','ENGINE_OUTPUT_INVALID','ENGINE_UNAVAILABLE','ENGINE_TIMEOUT','ENGINE_OBSERVATION_FAILED']);
+const errorCodes=new Set(['USAGE','TARGET_INVALID','ENGINE_OUTPUT_INVALID','ENGINE_UNAVAILABLE','ENGINE_TIMEOUT','ENGINE_OBSERVATION_FAILED','APPLICATION_BINDING_UNVERIFIED','APPLICATION_RESPONSE_INVALID','APPLICATION_TIMEOUT','APPLICATION_UNAVAILABLE']);
 const states=new Set(['created','restarting','running','removing','paused','exited','dead']);
 const keys=['id','project','service','imageConfigDigest','running','state','health','exitCode','restarts'].sort().join(',');
 const template='{ "id":{{json .Id}}, "project":{{json (index .Config.Labels "com.docker.compose.project")}}, "service":{{json (index .Config.Labels "com.docker.compose.service")}}, "imageConfigDigest":{{json .Image}}, "running":{{json .State.Running}}, "state":{{json .State.Status}}, "health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}, "exitCode":{{json .State.ExitCode}}, "restarts":{{json .RestartCount}} }';

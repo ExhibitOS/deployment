@@ -37,6 +37,33 @@ stderr와 실행 실패의 raw message/stack은 표시하지 않고 고정 오�
 사용자가 입력한 이름 자체에 secret을 넣지 마세요. Docker credential/context는 기존
 환경 그대로 사용하며 이 도구가 secret reference를 해석하지 않습니다.
 
-검사: `npm test`. 설치와 application readiness·metrics·운영 dashboard 및 전체 복구
+검사: `npm test`. 설치와 metrics·운영 dashboard 및 전체 복구
 검사는 원래 배포 단계에서 추가해야 합니다. 이 도구는 OED를 실행하는 adapter가
 아니며 OED 형식 검사와 혼동하지 않습니다.
+
+
+## 관찰한 포트에 연결된 애플리케이션 준비 상태
+
+```sh
+node bin/diagnose.mjs --project exhibitos-example --services platform,database --application-readiness platform
+```
+
+추가 옵션은 서비스 목록에 있는 Platform 서비스 하나를 지정합니다. Docker에서
+관찰한 해당 컨테이너의 `8080/tcp` 포트가 오직 `127.0.0.1`의 단일 포트로 공개된
+경우에만 `/api/v1/readiness`를 읽습니다. 주소·URL·credential은 입력받지 않습니다.
+외부 주소, wildcard, IPv6, 다중 binding 또는 포트 미공개는 unknown입니다.
+
+HTTP 요청 전후 container ID, image config digest, running 상태, restart count,
+포트 binding과 최종 서비스 census를 비교합니다. 응답은 최대16KiB/2초이며
+전체 관찰20초 예산을 공유합니다. redirect, 인증, cookie, proxy, DNS 조회와
+응답 재시도는 사용하지 않습니다. JSON 중복 필드와 지원하지 않는 버전·서비스·
+응답 상태 조합을 거부합니다. 현재 지원 계약은 protocol1, Platform0.1.0,
+schema1.0.0-draft.1 및 platform/api/database/web/storage의 다섯 상태입니다.
+
+이 모드의 종료0은 컨테이너 건강과 HTTP 준비 상태 모두 확인됐을 때만 가능합니다.
+HTTP503의 유효한 unavailable 응답이나 포트/상태 변경은 종료2입니다. 건강한
+컨테이너만으로 HTTP 준비 완료를 주장하지 않습니다. 응답 원문은 출력하지 않습니다.
+
+준비 상태는 해당 순간의 애플리케이션 보고입니다. 원자적 snapshot, 서명된
+릴리스 진위, Realtime, TLS, CPU/RAM/disk/queue, 전체 복구 또는 운영 배포의
+완료 증거가 아닙니다. 이전 기본 모드는 HTTP를 호출하지 않습니다.
