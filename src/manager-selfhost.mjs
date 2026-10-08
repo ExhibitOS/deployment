@@ -1,4 +1,5 @@
 // Copyright 2026 ExhibitOS contributors. SPDX-License-Identifier: Apache-2.0
+import {validateLocalSelfhostProfile} from './local-selfhost-profile.mjs';
 import {execFile} from 'node:child_process';
 import {constants} from 'node:fs';
 import {open,lstat,realpath} from 'node:fs/promises';
@@ -28,12 +29,6 @@ async function pinnedFile(path,limit,{privateMode=true,executable=false}={}){
   if(bytes.length>limit||!same(before,await fd.stat({bigint:true}))||!same(before,await lstat(path,{bigint:true})))fail('SELFHOST_SOURCE_CHANGED');
   return {bytes,digest:sha(bytes)};
  }finally{await fd.close();}
-}
-function profile(oed,manifest,compose){
- if(!closed(oed,['schemaVersion','kind','id','createdAt','target','runtime','storage','secretRefs'])||oed.schemaVersion!=='1.0.0-draft.1'||oed.kind!=='deployment'||!closed(oed.target,['type'])||oed.target.type!=='local-compose'||!closed(oed.runtime,['image','httpPort','replicas'])||oed.runtime.replicas!==1||oed.runtime.httpPort!==13200||!/^.+@sha256:[a-f0-9]{64}$/.test(oed.runtime.image))fail('SELFHOST_PROFILE_UNSUPPORTED');
- const db=oed.storage?.metadata,assets=oed.storage?.assets;
- if(!closed(oed.storage,['metadata','assets'])||!closed(db,['type','host','port','database','user','passwordSecretRef'])||db.type!=='postgresql'||db.host!=='database'||db.port!==5432||db.database!=='exhibitos'||db.user!=='exhibitos'||!closed(assets,['type','path'])||assets.type!=='filesystem'||assets.path!=='data/assets'||!Array.isArray(oed.secretRefs)||oed.secretRefs.length!==1||!closed(oed.secretRefs[0],['id','source','variable'])||oed.secretRefs[0].id!==db.passwordSecretRef||oed.secretRefs[0].source!=='environment'||!/^EXHIBITOS_[A-Z0-9_]{1,64}$/.test(oed.secretRefs[0].variable))fail('SELFHOST_PROFILE_UNSUPPORTED');
- if(manifest.preferredEngine!=='docker'||manifest.schemaVersion!=='1.0.0-draft.1'||manifest.protocolVersion!=='1'||manifest.projectName!==compose.name||!/^exhibitos-[a-z0-9-]{1,38}$/.test(manifest.projectName)||manifest.composeSha256!==sha(Buffer.from(compose.bytes))||JSON.stringify(manifest.services)!==JSON.stringify(['platform','database'])||JSON.stringify(manifest.ports)!=='[13200]'||manifest.openUrl!=='http://127.0.0.1:13200'||manifest.readinessUrl!=='http://127.0.0.1:13200/api/v1/readiness'||!Array.isArray(manifest.images)||manifest.images.length!==2||manifest.images[0].reference!==oed.runtime.image||compose.services?.platform?.image!==oed.runtime.image||compose.services?.database?.image!==manifest.images[1].reference||!/^.+@sha256:[a-f0-9]{64}$/.test(manifest.images[1].reference))fail('SELFHOST_BUNDLE_MISMATCH');
 }
 async function jobSnapshot(root){
  try{const file=await pinnedFile(join(root,'jobs.json'),4*1024*1024),jobs=boundedJSON(file.bytes.toString(),4*1024*1024);if(!Array.isArray(jobs)||jobs.length>10000)fail('SELFHOST_JOB_INVALID');return {digest:file.digest,jobs};}
@@ -68,7 +63,7 @@ export async function planSelfhost({root,oedPath,managerPath,approved},{run=dock
   const inputs={oed:await pinnedFile(oedPath,65536),manifest:await pinnedFile(join(root,'bundle/manifest.json'),65536),compose:await pinnedFile(join(root,'bundle/compose.yaml'),65536),manager:await pinnedFile(managerPath,32*1024*1024,{privateMode:false,executable:true}),environment:await pinnedFile(join(root,'runtime.env'),65536)};
   for(const [name,digest] of [['oed',approved.oedSha256],['manifest',approved.manifestSha256],['compose',approved.composeSha256],['manager',approved.managerSha256]])if(inputs[name].digest!==digest)fail('SELFHOST_APPROVAL_MISMATCH');
   const oed=boundedJSON(inputs.oed.bytes.toString(),65536),manifest=boundedJSON(inputs.manifest.bytes.toString(),65536),compose=boundedJSON(inputs.compose.bytes.toString(),65536);
-  profile(oed,manifest,{...compose,bytes:inputs.compose.bytes.toString()});
+  validateLocalSelfhostProfile(oed,manifest,compose,inputs.compose.digest);
   const state=await managerState(root),jobs=(await jobSnapshot(root)).jobs;
   const budget={deadline:performance.now()+20000};
   const budgetedRun=async(args,options={})=>{const left=budget.deadline-performance.now();if(left<=0)fail('SELFHOST_TIME_QUOTA');const text=await run(args,{...options,timeout:Math.min(8000,left)});if(performance.now()>budget.deadline)fail('SELFHOST_TIME_QUOTA');return text;};
