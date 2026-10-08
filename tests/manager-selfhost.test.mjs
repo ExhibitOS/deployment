@@ -22,7 +22,7 @@ async function fixture(t){
 test('plan is read-only; explicit cached Install uses pinned child environment and consumes genuine capability',async t=>{
  const f=await fixture(t),before=await readFile(join(f.root,'runtime.env'));const plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
  assert.equal(plan.mode,'fresh');assert.equal(JSON.stringify(plan).includes('never-output'),false);
- let calls=0;const result=await applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async(path,args,env)=>{calls++;assert.equal(path,f.input.managerPath);assert.deepEqual(args.slice(2),['install-existing-images','--preserve-volumes','--existing-images-only']);assert.equal(env.DOCKER_HOST,'unix:///synthetic/docker.sock');assert.equal(env.DOCKER_CONTEXT,undefined);assert.equal(env.DOCKER_TLS_VERIFY,undefined);return JSON.stringify({id:'synthetic-job',state:'completed',attempt:1,errorCode:null});}});
+ let calls=0;const result=await applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async(path,args,env)=>{calls++;assert.equal(path,f.input.managerPath);assert.deepEqual(args.slice(2),['install-existing-images','--preserve-volumes','--existing-images-only']);assert.equal(env.DOCKER_HOST,'unix:///synthetic/docker.sock');assert.equal(env.DOCKER_CONTEXT,undefined);assert.equal(env.DOCKER_TLS_VERIFY,undefined);return JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1,errorCode:null});}});
  assert.equal(result.state,'completed');assert.equal(calls,1);assert.deepEqual(await readFile(join(f.root,'runtime.env')),before);
  await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true}),{code:'SELFHOST_CONSENT_REQUIRED'});
  assert.ok(f.calls.filter(c=>c.args.includes('ps')).every(c=>c.args[0]==='--host'));
@@ -46,4 +46,10 @@ test('context drift and private binding tamper refuse before CLI; no old receipt
  f.env.DOCKER_CONTEXT='fixture';const second=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
  await writeFile(join(f.root,'deployment-binding.json'),'{}',{mode:0o600});
  await assert.rejects(()=>applySelfhost(second,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:()=>assert.fail('no child allowed')}),{code:'SELFHOST_SOURCE_CHANGED'});
+});
+
+test('completed child result cannot bless configuration drift or an unbounded job identifier',async t=>{
+ const f=await fixture(t),plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ await assert.rejects(()=>applySelfhost(plan,{action:'install',preserveVolumes:true,existingImagesOnly:true},{managerRun:async()=>{await writeFile(join(f.root,'runtime.env'),'changed-during-child\n');return JSON.stringify({id:'70000000-0000-4000-8000-000000000002',action:'install',cachedImagesOnly:true,state:'completed',attempt:1});}}),{code:'SELFHOST_SOURCE_CHANGED'});
+ assert.equal(JSON.stringify(plan).includes('changed-during-child'),false);
 });

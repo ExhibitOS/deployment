@@ -8,6 +8,7 @@ import {boundedJSON} from './bounded-json.mjs';
 import {bindLocalEngine} from './engine-locality.mjs';
 import {dockerRead,parseIds} from './diagnostics.mjs';
 const leases=new WeakMap(),sha=b=>createHash('sha256').update(b).digest('hex');
+const uuidRE=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const hashRE=/^[a-f0-9]{64}$/,recordName='deployment-binding.json';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const closed=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys.sort().join(',');
@@ -98,8 +99,10 @@ export async function applySelfhost(plan,{action,preserveVolumes,existingImagesO
   if(!identity(lease.rootStat,await privateDirectory(root))||JSON.stringify(boundedJSON((await pinnedFile(join(root,recordName),65536)).bytes.toString(),65536))!==JSON.stringify(binding)||JSON.stringify(await managerState(root))!==JSON.stringify(lease.state))fail('SELFHOST_BINDING_CHANGED');
   const args=['--root',root,...(action==='install'?['install-existing-images','--preserve-volumes','--existing-images-only']:[action])];
   const result=boundedJSON(await managerRun(lease.managerPath,args,engine.managerEnvironment()),262144);
-  if(typeof result?.id!=='string'||!['completed','failed'].includes(result.state)||!Number.isInteger(result.attempt))fail('SELFHOST_MANAGER_RESPONSE_INVALID');
+  if(typeof result?.id!=='string'||!uuidRE.test(result.id)||!['completed','failed'].includes(result.state)||!Number.isInteger(result.attempt)||result.attempt<1||result.attempt>4294967295||!['install','start','stop','restart'].includes(result.action)||(action!=='retry'&&result.action!==action)||(result.action==='install'&&result.cachedImagesOnly!==true))fail('SELFHOST_MANAGER_RESPONSE_INVALID');
   await engine.verify();
+  if(!identity(lease.rootStat,await privateDirectory(root))||JSON.stringify(boundedJSON((await pinnedFile(join(root,recordName),65536)).bytes.toString(),65536))!==JSON.stringify(binding))fail('SELFHOST_BINDING_CHANGED');
+  for(const [name,path] of [['oed',lease.oedPath],['manifest',join(root,'bundle/manifest.json')],['compose',join(root,'bundle/compose.yaml')],['environment',join(root,'runtime.env')],['manager',lease.managerPath]])if((await pinnedFile(path,name==='manager'?32*1024*1024:65536,{privateMode:name!=='manager',executable:name==='manager'})).digest!==lease.inputs[name].digest)fail('SELFHOST_SOURCE_CHANGED');
   return {version:1,action,jobId:result.id,state:result.state,attempt:result.attempt,code:typeof result.errorCode==='string'&&/^[A-Z0-9_]{1,64}$/.test(result.errorCode)?result.errorCode:null,preservedVolumes:true,automaticRollback:false,fullDeploymentQualified:false};
  }catch(error){fail(error.code?.startsWith('SELFHOST_')?error.code:'SELFHOST_OPERATION_UNCERTAIN');}
 }
