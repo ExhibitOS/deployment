@@ -7,7 +7,7 @@ Deployment adapters. OCI/compose, Generic SSH, DNS/TLS, OpenTofu와 provider ada
 읽기 전용 Compose 컨테이너 진단 도구를 구현했습니다. Node24.21.0에서
 `npm test`로 경계 검사를 실행합니다. 외부 package와 설치 단계는 없습니다.
 명시적으로 요청하면 확인된 로컬 Docker 연결과 관찰한 localhost 포트에서 Platform HTTP readiness를 확인합니다. 원격 Docker 연결의 HTTP 검사는 거부합니다.
-로컬 self-host 설치와 변경은 기존 Manager에 위임하는 소스 어댑터를 제공합니다. Generic SSH의 plan/install/start/stop/restart/retry/status/logs 진입점과 수동 DNS·HTTPS readiness 관찰도 소스로 구현했습니다. SSH 실행에는 준비된 Linux bundle·이미지·비공개 runtime 설정이 필요합니다. 실제 원격 배포·DNS/TLS·방화벽·중단 복구 검증은 미실행이며 rollback은 명시적으로 거부합니다. [사용 조건과 검증 한계](docs/generic-ssh.md)를 확인하세요. 소스 검사 통과는 전체 T10-01/T10-02 또는 운영 배포 완료를 뜻하지 않습니다.
+로컬 self-host 설치와 변경은 기존 Manager에 위임하는 소스 어댑터를 제공합니다. Generic SSH의 plan/install/start/stop/restart/retry/status/logs 진입점과 수동 DNS·HTTPS readiness 관찰도 소스로 구현했습니다. SSH 실행에는 준비된 Linux bundle·이미지·비공개 runtime 설정이 필요합니다. 실제 원격 배포·DNS/TLS·방화벽·중단 복구 검증은 미실행이며 rollback은 기존 signed Manager 원래 백업 전체 복원·health·activation·선택 확인 계약에 연결하며 실제 SSH 복구 검증은 미실행입니다. [사용 조건과 검증 한계](docs/generic-ssh.md)를 확인하세요. 소스 검사 통과는 전체 T10-01/T10-02 또는 운영 배포 완료를 뜻하지 않습니다.
 
 ```sh
 node bin/diagnose.mjs --project exhibitos-example --services platform,database
