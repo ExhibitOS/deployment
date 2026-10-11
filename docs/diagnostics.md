@@ -37,8 +37,7 @@ stderr와 실행 실패의 raw message/stack은 표시하지 않고 고정 오�
 사용자가 입력한 이름 자체에 secret을 넣지 마세요. Docker credential/context는 기존
 환경 그대로 사용하며 이 도구가 secret reference를 해석하지 않습니다.
 
-검사: `npm test`. 설치와 metrics·운영 dashboard 및 전체 복구
-검사는 원래 배포 단계에서 추가해야 합니다. 이 도구는 OED를 실행하는 adapter가
+검사: `npm test`. 아래 명시적 자원 관찰 옵션을 제공하며, 설치·전체 운영 dashboard·전체 복구 검사는 별도입니다. 이 도구는 OED를 실행하는 adapter가
 아니며 OED 형식 검사와 혼동하지 않습니다.
 
 
@@ -73,3 +72,31 @@ HTTP503의 유효한 unavailable 응답이나 포트/상태 변경은 종료2입
 Optional Platform HTTP readiness refuses TCP (including localhost), SSH and other remote Docker transports before any container census or HTTP request. It resolves the effective selection in Docker order: nonempty `DOCKER_CONTEXT`, then `DOCKER_HOST`, then the current context. Context discovery reads only the selected Docker endpoint; no TLS/credential fields are requested. Only bounded Unix socket or local named-pipe endpoints are admitted. Unsupported context names/transports fail closed.
 
 All optional-mode Docker observations use the resolved explicit host and a frozen environment, so changing the current context cannot redirect an intermediate census/inspection. Selection environment and context endpoint are reobserved immediately before HTTP and after the final census; drift refuses positive readiness. This is a point observation, not an atomic lock on Docker configuration. The socket/named-pipe daemon and any local proxy are trusted local infrastructure; a local proxy forwarding elsewhere is not cryptographically detected. No signed engine identity or remote-engine readiness is qualified. Raw endpoint paths, selection environment and credential metadata do not enter the diagnostic receipt. Container-only mode remains independent of this local HTTP requirement.
+
+
+## 명시적 자원 관찰
+
+```sh
+node bin/diagnose.mjs --project exhibitos-example --services platform,database --resources
+```
+
+기본 진단과 `--application-readiness` 호출·응답은 유지합니다. 이 옵션은 선언한 서비스가 각각 하나인 프로젝트만 관찰합니다. 고정된 전체 container ID에 `docker stats --no-stream --no-trunc`를 사용해 CPU와 메모리를 읽고, `docker inspect --size`의 ID·project·쓰기 레이어 크기만 읽습니다. Docker 공식 [stats 설명](https://docs.docker.com/reference/cli/docker/container/stats/)과 [inspect 설명](https://docs.docker.com/reference/cli/docker/inspect/)에 기반합니다. Env, mounts, 로그, 프로세스 인수, 자격증명, host 디렉터리 경로를 요청하지 않습니다. 쓰기·실행·재시도는 하지 않습니다.
+
+CPU는 단일 코어 기준 백분율이므로 여러 코어에서100%를 넘을 수 있습니다. 메모리 bytes는 CLI 표시 문자열의 추정값이며 Linux Docker CLI의 cache 제외 의미를 따릅니다. 임계값은 CPU90%, 메모리85%, 컨테이너 쓰기 레이어1GiB의 **순간 관찰 경고**입니다. 운영 한도·CPU quota·지속 과부하·자동 알림이나 자동 변경을 뜻하지 않습니다. exit code가0이 아니었던 컨테이너 수와 현재 컨테이너의 restart 누계도 제공하며, 오류 발생률로 해석하지 않습니다.
+
+쓰기 레이어와 root filesystem bytes는 볼륨·DB·blob·호스트 파일시스템의 사용량 또는 여유 공간이 아닙니다. 따라서 `storageCapacity`는 `unknown`입니다. 작업 대기열은 현재 tenant의 인증된 집계가 없으면 `unknown`입니다. 이 결과만으로 전체 운영 지표 연결이 완료됐다고 표시하지 않습니다. unsupported format·정지된 서비스·측정 실패·출력 오류는0으로 대체하지 않습니다.
+
+자원 관찰은 기존 전체20초 예산 안에서 최대5초만 사용하고 마지막 container census를 위해8초를 남깁니다. 명령별 자원 관찰은 최대2초/256KiB입니다. 마지막 census가 달라지면 숫자 관찰은 모두 폐기합니다. 이는 원자적 snapshot이나 Docker daemon의 암호학적 신원 증명이 아닙니다.
+
+종료0은 기존 container health와 CPU/RAM/쓰기 레이어 관찰이 모두 확인된 경우입니다. 일부 자원값이 unknown이면 종료2이며 container health 사실은 별도 필드에 남습니다. data-volume capacity·작업 대기열이 측정됐다는 의미는 아닙니다. 인증된 tenant의 queue/error와 configured blob 여유 공간은 아래 별도 API에서 관찰합니다. 이 CLI만으로 해당 관찰을 대신하지 않습니다.
+
+
+## 인증된 tenant 운영 지표
+
+Platform의 `GET /api/v1/tenants/{tenantId}/operations/metrics`는 기존 로그인 session으로 현재 tenant의 관리자만 읽습니다. 현재 membership을 다시 확인하며 다른 tenant 접근은 거부합니다. 응답은 `Cache-Control: no-store`이고 작품·작업 ID, object key, credential, 원문 오류나 저장소 경로를 포함하지 않습니다.
+
+실제 asset-import와 OEX-import 두 대기열의 queued/processing 수, 가장 오래 대기한 작업의 나이와 최근24시간에 updated된 현재 failed 작업 수를 제공합니다. 이는 전체 오류 event 수나 오류 발생률이 아닙니다. OEX export는 동기 처리이므로 별도 persistent export queue를 꾸며내지 않습니다. 대기300초 이상 또는 failed 작업1개 이상은 조사가 필요한 순간 경고이며 자동 복구·자동 알림·서비스 한도는 아닙니다.
+
+실제 configured `FileBlobStore`인 경우 그 디렉터리가 놓인 **공유 파일시스템**의 전체·가용 bytes와 free percent를 읽습니다. tenant quota, DB volume capacity 또는 컨테이너 writable layer와 같지 않습니다. free percent10% 미만은 경고입니다. S3·다른 backend 또는 로컬 관찰 실패는 `unknown`이며 임의의 host 디렉터리로 대체하지 않습니다.
+
+집계 SQL의 transaction-local statement timeout은2초입니다. 비동기 파일시스템 호출 전체의 deadline이나 취소 완료는 보장하지 않습니다. 서로 다른 시점의 관찰이므로 원자적 snapshot을 주장하지 않습니다. CPU/RAM은 위 컨테이너 진단에서 별도로 관찰하며 이 API의 해당 항목과 DB capacity는 관찰하지 않은 `unknown`으로 남습니다.
