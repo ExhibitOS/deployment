@@ -2,7 +2,7 @@
 
 The AWS EC2 reference provisions one host suitable for the existing Generic SSH OCI/compose Platform + PostgreSQL path. Cloudflare Workers cannot run that host runtime, so this adapter does not repurpose exhibitos.org, its DNS or its website. Unsupported providers retain [Generic SSH](generic-ssh.md). No AWS/GCP/Azure umbrella support is claimed.
 
-The local module pins [OpenTofu 1.12.0](https://github.com/opentofu/opentofu/releases/tag/v1.12.0) and [hashicorp/aws 6.42.0](https://github.com/hashicorp/terraform-provider-aws/blob/v6.42.0/website/docs/r/instance.html.markdown). AMI, subnet, existing security groups and SSH public-key registration are explicit operator inputs; there is no latest-image lookup, network/DNS creation or embedded secret/user-data. IMDSv2 and encrypted root disk are set. Bootstrap/install, authenticated current readiness, backup and rollback remain the separate Manager/Generic SSH lifecycle; a present VM never means the exhibition is ready.
+The local module uses the explicit official `registry.terraform.io/hashicorp/aws` provider address (avoiding an implicit registry selection) and pins [OpenTofu 1.12.0](https://github.com/opentofu/opentofu/releases/tag/v1.12.0) and [hashicorp/aws 6.42.0](https://github.com/hashicorp/terraform-provider-aws/blob/v6.42.0/website/docs/r/instance.html.markdown). AMI, subnet, existing security groups and SSH public-key registration are explicit operator inputs; there is no latest-image lookup, network/DNS creation or embedded secret/user-data. IMDSv2 and encrypted root disk are set. Bootstrap/install, authenticated current readiness, backup and rollback remain the separate Manager/Generic SSH lifecycle; a present VM never means the exhibition is ready.
 
 ## Secret-free local dry-run
 
