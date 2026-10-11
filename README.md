@@ -7,7 +7,7 @@ Deployment adapters. OCI/compose, Generic SSH, DNS/TLS, OpenTofu와 provider ada
 읽기 전용 Compose 컨테이너 진단 도구를 구현했습니다. Node24.21.0에서
 `npm test`로 경계 검사를 실행합니다. 외부 package와 설치 단계는 없습니다.
 명시적으로 요청하면 확인된 로컬 Docker 연결과 관찰한 localhost 포트에서 Platform HTTP readiness를 확인합니다. 원격 Docker 연결의 HTTP 검사는 거부합니다.
-서비스 설치·변경, SSH/provider 배포와 DNS/TLS는 아직 구현되지 않았습니다. 진단 성공은 전체 T10-01 또는 운영 배포 완료를 뜻하지 않습니다.
+로컬 self-host 설치와 변경은 기존 Manager에 위임하는 소스 어댑터를 제공합니다. Generic SSH의 plan/install/start/stop/restart/retry/status/logs 진입점과 수동 DNS·HTTPS readiness 관찰도 소스로 구현했습니다. SSH 실행에는 준비된 Linux bundle·이미지·비공개 runtime 설정이 필요합니다. 실제 원격 배포·DNS/TLS·방화벽·중단 복구 검증은 미실행이며 rollback은 명시적으로 거부합니다. [사용 조건과 검증 한계](docs/generic-ssh.md)를 확인하세요. 소스 검사 통과는 전체 T10-01/T10-02 또는 운영 배포 완료를 뜻하지 않습니다.
 
 ```sh
 node bin/diagnose.mjs --project exhibitos-example --services platform,database
@@ -27,7 +27,7 @@ project 이름을 사용하며 예제 project는 설치 대상이 아닙니다.
 
 spec의 OED와 공개 platform OCI image를 사용하고 manager가 adapter를 호출한다.
 
-이 저장소는 공개 후보이며 현재 GitHub에서는 비공개다. operations 및 Capture 저장소는 빌드·설치·CI 의존성이 될 수 없다. private submodule, private package와 secret을 필수 조건으로 추가하지 않는다. 공개 전환·라이선스 적용은 별도 기록과 검토 후 수행한다.
+이 저장소는 초기 문서에서 비공개인 공개 후보로 계획되었으며 현재 GitHub에서는 공개 저장소입니다. operations 및 Capture 저장소는 빌드·설치·CI 의존성이 될 수 없다. private submodule, private package와 secret을 필수 조건으로 추가하지 않는다. 공개 전환·라이선스 적용은 별도 기록과 검토 후 수행한다.
 
 ## 구현 순서
 
@@ -49,4 +49,6 @@ T00-02에서 toolchain·지원 환경·build/lint/typecheck/test 명령을 확�
 외부 코드·package·폰트·이미지·작품과 함께 배포하는 platform은 각각 원래 조건을 유지합니다.
 원본 LICENSE와 관련 copyright·NOTICE를 보존하고 수정 파일에는 변경 고지를 남깁니다.
 이 라이선스는 상표 허락이나 사용자 작품의 display/export 권한을 부여하지 않습니다.
-진단 코드에는 외부 dependency가 없습니다. 배포 image·provider 실행은 구현되지 않았으며, 도입 시 출처와 재배포 조건을 확인합니다.
+진단 코드에는 외부 dependency가 없습니다. Provider API 배포는 구현되지 않았습니다. 기존 Manager·준비된 배포 image를 사용할 때도 출처와 재배포 조건을 유지합니다.
+
+Generic SSH source entry point and its current qualification limits are documented in [docs/generic-ssh.md](docs/generic-ssh.md).
