@@ -45,7 +45,7 @@ export function executeRemoteMaintenance(i,{fs,execFileSync,join,read,ancestors,
  safe(m.profilePath);safe(m.updatePath);const root=fs.lstatSync(m.profilePath);if(!root.isDirectory()||(root.mode&511)!==448)fail('SSH_UPDATE_INPUT_UNSAFE');const executable=read(m.updatePath,33554432,true);if(sha(executable)!==m.updateSha256)fail('SSH_UPDATE_EXECUTABLE_CHANGED');
  const update=(command,args=[])=>call(m.updatePath,[command,'--profile',m.profilePath,'--installation','default',...args,'--apps-closed']);
  const before=update('update-intent'),intent=before?.intent?.update,plan=intent?.plan;
- if(before?.trust?.generation!==m.expectedGeneration||plan?.operationId!==m.operationId)fail('SSH_UPDATE_AUTHORITY_CHANGED');
+ if(!Number.isSafeInteger(before?.trust?.generation)||before.trust.generation<m.expectedGeneration||(action==='update'&&before.trust.generation!==m.expectedGeneration)||plan?.operationId!==m.operationId)fail('SSH_UPDATE_AUTHORITY_CHANGED');
  const source=plan.sourceInstance==='default'?join(m.profilePath,'local-runtime'):join(m.profilePath,'installations',plan.sourceInstance);if(source!==i.remoteRoot)fail('SSH_UPDATE_SOURCE_MISMATCH');
  let result=null;
  if(action==='update'){
@@ -56,7 +56,7 @@ export function executeRemoteMaintenance(i,{fs,execFileSync,join,read,ancestors,
  }
  if(sha(read(m.updatePath,33554432,true))!==m.updateSha256)fail('SSH_UPDATE_EXECUTABLE_CHANGED');
  const cold=update('update-intent'),current=cold?.intent?.update;
- if(current?.plan?.operationId!==m.operationId||JSON.stringify(current.plan)!==JSON.stringify(plan)||!Number.isSafeInteger(cold?.trust?.generation))fail('SSH_UPDATE_UNVERIFIED');
+ if(current?.plan?.operationId!==m.operationId||JSON.stringify(current.plan)!==JSON.stringify(plan)||!Number.isSafeInteger(cold?.trust?.generation)||(action==='update-status'&&cold.trust.generation<m.expectedGeneration))fail('SSH_UPDATE_UNVERIFIED');
  const receipt=result?.selection,candidate=current?.health?.instanceId??null;
  let health=false,selected=false;
  if(action==='update'){
