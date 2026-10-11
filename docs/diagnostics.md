@@ -88,4 +88,15 @@ CPU는 단일 코어 기준 백분율이므로 여러 코어에서100%를 넘을
 
 자원 관찰은 기존 전체20초 예산 안에서 최대5초만 사용하고 마지막 container census를 위해8초를 남깁니다. 명령별 자원 관찰은 최대2초/256KiB입니다. 마지막 census가 달라지면 숫자 관찰은 모두 폐기합니다. 이는 원자적 snapshot이나 Docker daemon의 암호학적 신원 증명이 아닙니다.
 
-종료0은 기존 container health와 CPU/RAM/쓰기 레이어 관찰이 모두 확인된 경우입니다. 일부 자원값이 unknown이면 종료2이며 container health 사실은 별도 필드에 남습니다. data-volume capacity·작업 대기열이 측정됐다는 의미는 아닙니다. 원래 전체 지표에는 configured blob 저장소의 실제 여유 공간, tenant-scoped queue/error 집계 연결과 해당 권한 검증이 남아 있습니다.
+종료0은 기존 container health와 CPU/RAM/쓰기 레이어 관찰이 모두 확인된 경우입니다. 일부 자원값이 unknown이면 종료2이며 container health 사실은 별도 필드에 남습니다. data-volume capacity·작업 대기열이 측정됐다는 의미는 아닙니다. 인증된 tenant의 queue/error와 configured blob 여유 공간은 아래 별도 API에서 관찰합니다. 이 CLI만으로 해당 관찰을 대신하지 않습니다.
+
+
+## 인증된 tenant 운영 지표
+
+Platform의 `GET /api/v1/tenants/{tenantId}/operations/metrics`는 기존 로그인 session으로 현재 tenant의 관리자만 읽습니다. 현재 membership을 다시 확인하며 다른 tenant 접근은 거부합니다. 응답은 `Cache-Control: no-store`이고 작품·작업 ID, object key, credential, 원문 오류나 저장소 경로를 포함하지 않습니다.
+
+실제 asset-import와 OEX-import 두 대기열의 queued/processing 수, 가장 오래 대기한 작업의 나이와 최근24시간에 updated된 현재 failed 작업 수를 제공합니다. 이는 전체 오류 event 수나 오류 발생률이 아닙니다. OEX export는 동기 처리이므로 별도 persistent export queue를 꾸며내지 않습니다. 대기300초 이상 또는 failed 작업1개 이상은 조사가 필요한 순간 경고이며 자동 복구·자동 알림·서비스 한도는 아닙니다.
+
+실제 configured `FileBlobStore`인 경우 그 디렉터리가 놓인 **공유 파일시스템**의 전체·가용 bytes와 free percent를 읽습니다. tenant quota, DB volume capacity 또는 컨테이너 writable layer와 같지 않습니다. free percent10% 미만은 경고입니다. S3·다른 backend 또는 로컬 관찰 실패는 `unknown`이며 임의의 host 디렉터리로 대체하지 않습니다.
+
+집계 SQL의 transaction-local statement timeout은2초입니다. 비동기 파일시스템 호출 전체의 deadline이나 취소 완료는 보장하지 않습니다. 서로 다른 시점의 관찰이므로 원자적 snapshot을 주장하지 않습니다. CPU/RAM은 위 컨테이너 진단에서 별도로 관찰하며 이 API의 해당 항목과 DB capacity는 관찰하지 않은 `unknown`으로 남습니다.
