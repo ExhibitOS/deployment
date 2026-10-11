@@ -49,6 +49,8 @@ T00-02에서 toolchain·지원 환경·build/lint/typecheck/test 명령을 확�
 외부 코드·package·폰트·이미지·작품과 함께 배포하는 platform은 각각 원래 조건을 유지합니다.
 원본 LICENSE와 관련 copyright·NOTICE를 보존하고 수정 파일에는 변경 고지를 남깁니다.
 이 라이선스는 상표 허락이나 사용자 작품의 display/export 권한을 부여하지 않습니다.
-진단 코드에는 외부 dependency가 없습니다. Provider API 배포는 구현되지 않았습니다. 기존 Manager·준비된 배포 image를 사용할 때도 출처와 재배포 조건을 유지합니다.
+진단 코드에는 외부 dependency가 없습니다. OpenTofu AWS reference와 provider plan/apply/status/destroy interface를 구현했으며 actual cloud apply·cleanup은 초기 0 KRW 비용 통제/isolated account 검증 전 차단됩니다. 기존 Manager·준비된 배포 image를 사용할 때도 출처와 재배포 조건을 유지합니다.
 
 Generic SSH source entry point and its current qualification limits are documented in [docs/generic-ssh.md](docs/generic-ssh.md).
+
+[OpenTofu pinned reference, secret-free dry-run and cloud mutation limits](docs/providers.md). Mock conformance uses `node --test tests/provider-adapter.test.mjs`; passing mocks does not establish a real cloud deployment.

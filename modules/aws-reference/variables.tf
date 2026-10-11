@@ -1,0 +1,10 @@
+# Copyright 2026 ExhibitOS contributors. SPDX-License-Identifier: Apache-2.0
+variable "account_id" { type = string }
+variable "region" { type = string }
+variable "project" { type = string }
+variable "ami_id" { type = string }
+variable "instance_type" { type = string }
+variable "subnet_id" { type = string }
+variable "security_group_ids" { type = list(string) }
+variable "key_name" { type = string }
+variable "root_gib" { type = number }
