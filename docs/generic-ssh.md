@@ -29,6 +29,8 @@ The remote adapter rechecks the ordinary source binding, approved update executa
 
 The adapter does not manufacture a signed recovery authority or claim that an unrelated standalone install can be rolled back through an existing signed plan. Prepare the matching Manager recovery inputs first. Failed or interrupted restores preserve their new candidate and require inspection through existing Manager recovery guidance.
 
+The signed plan names the native registered source UUID. Its preserved selection registry determines the source root: a default entry uses `profile/local-runtime`, while a recovery entry uses `profile/installations/<UUID>`. Update/status and rollback validate the closed native registry and exact registered ID before retaining their existing remote-root equality checks. A literal `default` source alias or caller-supplied path does not substitute for that UUID. The native profile and OED versions remain unchanged.
+
 An observed UFW default-deny policy is reported separately as `firewallPolicyObserved`; `firewallVerified` remains false. A successful endpoint observation does not establish firewall, deployment, rollback or recovery completion.
 
 ## Current verification scope
