@@ -7,9 +7,9 @@ import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import {planSelfhost,applySelfhost} from '../src/manager-selfhost.mjs';
 const digest=b=>createHash('sha256').update(b).digest('hex');
-async function fixture(t){
+async function fixture(t,image=`ghcr.io/exhibitos/platform@sha256:${'a'.repeat(64)}`){
  const root=await realpath(await mkdtemp(join(tmpdir(),'exhibitos-selfhost-')));t.after(()=>rm(root,{recursive:true,force:true}));await mkdir(join(root,'bundle'),{mode:0o700});
- const image=`ghcr.io/exhibitos/platform@sha256:${'a'.repeat(64)}`,db=`postgres@sha256:${'b'.repeat(64)}`;
+ const db=`postgres@sha256:${'b'.repeat(64)}`;
  const bundleId='70000000-0000-4000-8000-000000000003',project=`exhibitos-${bundleId}`,labels={'com.exhibitos.bundle':bundleId,'com.exhibitos.project':project,'com.exhibitos.schema':'1.0.0-draft.1'};
  const compose=JSON.stringify({name:project,services:{database:{image:db,environment:{POSTGRES_PASSWORD:'${POSTGRES_PASSWORD:?required}',POSTGRES_DB:'exhibitos',POSTGRES_USER:'exhibitos'},volumes:['database:/var/lib/postgresql'],labels,healthcheck:{test:['CMD-SHELL','pg_isready -U exhibitos -d exhibitos'],interval:'5s',timeout:'3s',retries:30},restart:'unless-stopped'},platform:{image,pull_policy:'never',env_file:['../runtime.env'],environment:{NODE_ENV:'production',EXHIBITOS_PORT:'${EXHIBITOS_PORT:-13200}',AUTH_ORIGIN:'http://127.0.0.1:${EXHIBITOS_PORT:-13200}',BLOB_ROOT:'/data/blobs',CONFIG_ROOT:'/data/config'},ports:['127.0.0.1:${EXHIBITOS_PORT:-13200}:8080'],volumes:['objects:/data/blobs','configuration:/data/config'],labels,depends_on:{database:{condition:'service_healthy'}},read_only:true,tmpfs:['/tmp:rw,nosuid,nodev,size=256m,mode=1777'],cap_drop:['ALL'],security_opt:['no-new-privileges:true'],restart:'unless-stopped',stop_grace_period:'30s'}},volumes:{database:{labels},objects:{labels},configuration:{labels}},networks:{default:{labels}}});
  const manifest=JSON.stringify({schemaVersion:'1.0.0-draft.1',bundleId,version:'0.1.0',protocolVersion:'1',preferredEngine:'docker',projectName:project,composeSha256:digest(compose),services:['platform','database'],images:[{reference:image},{reference:db}],ports:[13200],openUrl:'http://127.0.0.1:13200',readinessUrl:'http://127.0.0.1:13200/api/v1/readiness',minimumFreeBytes:3*1024*1024*1024});
@@ -127,5 +127,22 @@ test('explicit local IPAM binds canonical subnet/gateway, exact Compose and read
   await writeFile(f.input.managerPath,executable,{mode:0o700});f.input.approved.managerSha256=digest(executable);
   if(mode==='valid'){const p=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});assert.equal(p.profile,'manager-local-selfhost-v2-explicit-ipam');assert.equal(p.explicitLocalNetwork.subnet,'10.240.0.0/28');}
   else await assert.rejects(()=>planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env}),{code:mode==='compose'?'SELFHOST_COMPOSE_PROFILE_MISMATCH':mode==='old-cli'?'SELFHOST_MANAGER_FEATURE_REQUIRED':'SELFHOST_NETWORK_POLICY_INVALID'});
+ }
+});
+
+// The normal Platform packager and Manager bind the actual local engine content ID.
+test('normal packaged bare image ID plans without changing approved bytes or consent',async t=>{
+ const image='sha256:'+'a'.repeat(64),f=await fixture(t,image);
+ const plan=await planSelfhost(f.input,{run:f.run,getEnvironment:()=>f.env});
+ assert.equal(plan.mode,'fresh');assert.equal(plan.secretValuesIncluded,false);
+ const manifest=JSON.parse(await readFile(join(f.root,'bundle/manifest.json')));
+ assert.equal(manifest.images[0].reference,image);assert.equal(manifest.protocolVersion,'1');
+ assert.equal(digest(await readFile(join(f.root,'bundle/compose.yaml'))),f.input.approved.composeSha256);
+ await assert.rejects(applySelfhost({...plan},{action:'install',preserveVolumes:true,existingImagesOnly:true}),{code:'SELFHOST_CONSENT_REQUIRED'});
+});
+test('local packed image zero malformed uppercase and mutable IDs refuse before engine',async t=>{
+ for(const image of ['sha256:'+'0'.repeat(64),'sha256:'+'A'.repeat(64),'sha256:'+'a'.repeat(63),'sha256:'+'a'.repeat(65),'SHA256:'+'a'.repeat(64),'sha256:'+'a'.repeat(64)+'\n','platform:latest','ghcr.io/exhibitos/platform@sha256:'+'0'.repeat(64)]){
+  const f=await fixture(t,image);
+  await assert.rejects(planSelfhost(f.input,{run:()=>assert.fail('invalid image must refuse before engine'),getEnvironment:()=>f.env}),{code:'SELFHOST_PROFILE_UNSUPPORTED'});
  }
 });
