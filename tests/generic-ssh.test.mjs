@@ -86,3 +86,22 @@ test('cancelled maintenance never starts or reports remote work rolled back',asy
  const {maintenanceSsh}=await import('../src/generic-ssh.mjs');let calls=0;const controller=new AbortController(),transport=async(o,c,s)=>{calls++;return {version:1,os:'ubuntu',binding};};
  const plan=await planSsh(oed,config,{run:transport});controller.abort();await assert.rejects(maintenanceSsh(plan,{action:'backup-jobs',input:null,preserveVolumes:true,signal:controller.signal}),e=>e.code==='SSH_CANCELLED');assert.equal(calls,1);const recovery=await planSsh(oed,config,{run:transport});await assert.rejects(rollbackSsh(recovery,{preserveVolumes:true,externalWritersQuiesced:true,appsClosed:true,signal:controller.signal}),e=>e.code==='SSH_CANCELLED');assert.equal(calls,2);
 });
+
+test('normal local packed content ID is admitted by SSH client and actual emitted remote predicate',async()=>{
+ const o=structuredClone(oed);o.runtime.image='sha256:'+'a'.repeat(64);
+ assert.equal(validateSshDescriptor(o).runtime.image,o.runtime.image);
+ const transport=async(descriptor,connection,script)=>{
+  // Exercise the predicate serialized into the real production remote script.
+  const match=script.match(/,image=(.+?),utc=/);assert(match);
+  const image=Function('return ('+match[1]+')')();
+  assert.equal(image(o.runtime.image),true);assert.equal(image(oed.runtime.image),true);
+  for(const invalid of ['sha256:'+'0'.repeat(64),'sha256:'+'A'.repeat(64),'sha256:'+'a'.repeat(63),'sha256:'+'a'.repeat(65),'sha256:'+'a'.repeat(64)+'\n','platform:latest','ghcr.io/exhibitos/platform@sha256:'+'0'.repeat(64)])assert.equal(image(invalid),false);
+  return {...await run(descriptor,connection,script),binding:{...binding,image:descriptor.runtime.image}};
+ };
+ const plan=await planSsh(o,config,{run:transport});assert.equal(plan.credentialsIncluded,false);
+ await assert.rejects(applySsh({...plan},{action:'install',preserveVolumes:true,existingImagesOnly:true}),e=>e.code==='SSH_CONSENT_REQUIRED');
+ for(const invalid of ['sha256:'+'0'.repeat(64),'sha256:'+'A'.repeat(64),'sha256:'+'a'.repeat(63),'sha256:'+'a'.repeat(65),'sha256:'+'a'.repeat(64)+'\n','platform:latest','ghcr.io/exhibitos/platform@sha256:'+'0'.repeat(64)]){
+  const changed=structuredClone(o);changed.runtime.image=invalid;assert.throws(()=>validateSshDescriptor(changed),e=>e.code==='SSH_RUNTIME_UNSUPPORTED');
+ }
+ const cloud=structuredClone(o);cloud.target.type='aws';assert.throws(()=>validateSshDescriptor(cloud),e=>e.code==='SSH_TARGET_INVALID');
+});
