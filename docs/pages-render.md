@@ -55,3 +55,5 @@ Official sources checked 2026-10-17:
 - [Render free environment limitations](https://render.com/docs/free)
 
 Explicit serviceId/postgresId selections are fetched by ID and must belong to the selected workspace and free plan. A conflicting selection fails without substitution or overwrite. Existing Postgres selections must match PostgreSQL18/Frankfurt; existing services must match the official native Node source/readiness endpoint and durable environment.
+
+Selecting an existing service also requires selecting its existing database; otherwise `RENDER_EXISTING_DATABASE_REQUIRED` is returned before any network mutation. The adapter never creates a replacement database in order to overwrite an existing service's durable connection configuration.

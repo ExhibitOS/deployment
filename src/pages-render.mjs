@@ -80,6 +80,7 @@ export async function executeHosted(request,options={}){
  if(action==='accounts'){const owners=await renderList(api,'owners');return {...baseResult('render',action,'ready'),accounts:owners.map(r=>{if(!id(r.id))fail('HOSTED_RESPONSE_INVALID');return {id:r.id,name:safeName(r.name)};})};}
  if(action==='services')return {...baseResult('render',action,'ready'),...await listRenderResources(request,options)};
  if(action==='deploy-api'){
+  if(request.serviceId&&!request.postgresId)fail('RENDER_EXISTING_DATABASE_REQUIRED');
   const envVars=runtimeEnv(options),db=await createFreePostgres(request,options);const expiresAt=db.expiresAt&&!Number.isNaN(Date.parse(db.expiresAt))?new Date(db.expiresAt).toISOString():undefined;
   const result={...baseResult('render',action,'deploying'),postgresId:db.id,...(expiresAt?{expiresAt}:{})};
   if(expiresAt&&Date.parse(expiresAt)<=Date.now())return {...result,state:'failed'};
