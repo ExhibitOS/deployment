@@ -49,6 +49,7 @@ async function findDeployment(api,route,hash){const list=await api(route+'?per_p
 async function cloudflare(request,options){const api=transport('cloudflare',options),action=request.action;
  if(action==='accounts'){const accounts=[];for(let page=1;page<=100;page++){const rows=await api(`/accounts?per_page=50&page=${page}`);if(!Array.isArray(rows))fail('HOSTED_RESPONSE_INVALID');for(const a of rows){if(!id(a.id))fail('HOSTED_RESPONSE_INVALID');accounts.push({id:a.id,name:safeName(a.name)});}if(rows.length<50)return {...baseResult('cloudflare',action,'ready'),accounts};}fail('HOSTED_PAGINATION_LIMIT');}
  if(!/^[a-f0-9]{32}$/.test(request.accountId)||!name(request.projectName))fail('HOSTED_REQUEST_INVALID');const route=`/accounts/${request.accountId}/pages/projects/${request.projectName}`,deployments=route+'/deployments';
+ if(action==='reconcile'){if(!hex(request.expectedManifestSha256))fail('HOSTED_REQUEST_INVALID');const hash=request.expectedManifestSha256.slice(0,40),d=await findDeployment(api,deployments,hash);return d?deploymentProjection(d,request.projectName,action):{...baseResult('cloudflare',action,'uncertain'),projectName:request.projectName,deploymentId:'pending-'+hash};}
  if(action==='status'){if(/^pending-[a-f0-9]{40}$/.test(request.deploymentId)){const d=await findDeployment(api,deployments,request.deploymentId.slice(8));return d?deploymentProjection(d,request.projectName,action):{...baseResult('cloudflare',action,'uncertain'),projectName:request.projectName,deploymentId:request.deploymentId};}if(!id(request.deploymentId))fail('HOSTED_REQUEST_INVALID');return deploymentProjection(await api(deployments+'/'+request.deploymentId),request.projectName,action);}
  if(action!=='deploy-static')fail('HOSTED_REQUEST_INVALID');const bundle=await inspectStaticBundle(request.sourcePath,{expectedManifestSha256:request.expectedManifestSha256});const contentHash=bundle.manifestSha256.slice(0,40);await cfProject(api,request.accountId,request.projectName);const previous=await findDeployment(api,deployments,contentHash);if(previous)return deploymentProjection(previous,request.projectName,action);
  const jwt=(await api(route+'/upload-token'))?.jwt;if(typeof jwt!=='string'||!jwt.length||jwt.length>16384)fail('HOSTED_RESPONSE_INVALID');
@@ -74,10 +75,20 @@ export async function createFreeService(request,options){const api=transport('re
  try{const result=await api('/services',{method:'POST',body:{type:'web_service',name:identity.name,ownerId:identity.ownerId,repo:'https://github.com/ExhibitOS/platform',branch:'main',autoDeployTrigger:'off',envVars,serviceDetails:{runtime:'node',plan:'free',region:'frankfurt',numInstances:1,healthCheckPath:'/api/v1/readiness',envSpecificDetails:{buildCommand:'npm ci && npm run build',startCommand:'node scripts/render-runtime.mjs'}}}});service=result.service??result;}catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;service=await uniqueResource(api,'services',identity.ownerId,identity.name);if(!service)fail('HOSTED_RESULT_UNCERTAIN');}assertFree(service,'services');if(service.name!==identity.name||service.ownerId!==identity.ownerId)fail('HOSTED_RESOURCE_CONFLICT');return projectService(service);}
 export async function listRenderResources(request,options){if(!id(request.workspaceId))fail('HOSTED_REQUEST_INVALID');const api=transport('render',options);const services=await renderList(api,'services','&ownerId='+request.workspaceId),postgres=await renderList(api,'postgres','&ownerId='+request.workspaceId);return {services:services.filter(r=>r.ownerId===request.workspaceId).map(r=>({id:r.id,name:safeName(r.name),free:r.serviceDetails?.plan==='free'})),postgres:postgres.filter(r=>r.owner?.id===request.workspaceId).map(r=>({id:r.id,name:safeName(r.name),free:r.plan==='free',...(typeof r.expiresAt==='string'&&!Number.isNaN(Date.parse(r.expiresAt))?{expiresAt:new Date(r.expiresAt).toISOString()}:{})}))};}
 export async function executeHosted(request,options={}){
- if(!object(request)||!['cloudflare','render'].includes(request.provider)||!['accounts','services','deploy-static','deploy-api','status'].includes(request.action))fail('HOSTED_REQUEST_INVALID');
+ if(!object(request)||!['cloudflare','render'].includes(request.provider)||!['accounts','services','deploy-static','deploy-api','status','reconcile'].includes(request.action))fail('HOSTED_REQUEST_INVALID');
  if(request.provider==='cloudflare'){if(['deploy-api','services'].includes(request.action))fail('HOSTED_REQUEST_INVALID');return cloudflare(request,options);}
  if(request.staticOnly===true)fail('HOSTED_RENDER_NOT_REQUIRED');const api=transport('render',options),action=request.action;
  if(action==='accounts'){const owners=await renderList(api,'owners');return {...baseResult('render',action,'ready'),accounts:owners.map(r=>{if(!id(r.id))fail('HOSTED_RESPONSE_INVALID');return {id:r.id,name:safeName(r.name)};})};}
+ if(action==='reconcile'){
+  const identity=renderIdentity(request);let serviceId=request.serviceId,postgresId=request.postgresId;
+  if(!serviceId){const service=await uniqueResource(api,'services',identity.ownerId,identity.name);if(service){assertFree(service,'services');serviceId=service.id;}}
+  if(!postgresId){const db=await uniqueResource(api,'postgres',identity.ownerId,identity.name+'-db');if(db){assertFree(db,'postgres');postgresId=db.id;}}
+  if(!serviceId&&!postgresId)return {...baseResult('render',action,'uncertain')};
+  const observed=await executeHosted({...request,action:'status',serviceId,postgresId},options);observed.action=action;
+  if(!serviceId)observed.state=observed.databaseState==='creating'?'deploying':'needs-configuration';
+  if(serviceId&&!postgresId)observed.state='uncertain';
+  return observed;
+ }
  if(action==='services')return {...baseResult('render',action,'ready'),...await listRenderResources(request,options)};
  if(action==='deploy-api'){
   if(request.serviceId&&!request.postgresId)fail('RENDER_EXISTING_DATABASE_REQUIRED');

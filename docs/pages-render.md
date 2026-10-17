@@ -57,3 +57,7 @@ Official sources checked 2026-10-17:
 Explicit serviceId/postgresId selections are fetched by ID and must belong to the selected workspace and free plan. A conflicting selection fails without substitution or overwrite. Existing Postgres selections must match PostgreSQL18/Frankfurt; existing services must match the official native Node source/readiness endpoint and durable environment.
 
 Selecting an existing service also requires selecting its existing database; otherwise `RENDER_EXISTING_DATABASE_REQUIRED` is returned before any network mutation. The adapter never creates a replacement database in order to overwrite an existing service's durable connection configuration.
+
+## Restart reconciliation
+
+`action:reconcile` is strictly read-only. For Cloudflare supply accountId/projectName/expectedManifestSha256 from the native pending intent; deployments are matched by the manifest-derived commit hash and project. Missing matches stay uncertain with a pending identifier. For Render supply workspaceId/projectName and any last-known serviceId/postgresId; otherwise deterministic names are discovered within the workspace, then the existing status projection is reused. No POST, create, overwrite or implicit retry is performed. No match remains uncertain; an observed database without a service needs a separate explicit continuation. Native pending intent must be saved before the original write and reconciled before any later create.
