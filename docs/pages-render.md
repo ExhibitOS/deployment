@@ -2,7 +2,7 @@
 
 This replaces the first-release hosted provider path; it does not remove retained Generic SSH/OpenTofu code or claim those providers as first-release requirements. Node 24.21.0; built-in modules only. No resources have been created by these tests.
 
-`src/pages-render.mjs` exports `executeHosted(request, {fetch, tokens, runtime})`, `inspectStaticBundle`, `listRenderResources`, `createFreePostgres`, and `createFreeService`. `fetch` defaults to the native fetch implementation and is injectable for deterministic HTTP tests. Tokens and optional Render `runtime.envVars` exist only in caller memory: no credential lookup, disk write, subprocess, logging, environment variable, redirect following or deletion is performed here. Errors contain fixed local codes; provider response bodies are never forwarded.
+`src/pages-render.mjs` exports `executeHosted(request, {fetch, tokens, runtime})`, `inspectStaticBundle`, `listRenderResources`, `createFreePostgres`, and `createFreeService`. `fetch` defaults to the native fetch implementation and is injectable for deterministic HTTP tests. Tokens and optional Render `runtime.envVars` exist only in caller memory: no credential lookup, disk write, subprocess, logging, environment variable, redirect following or deletion is performed here. HTTP 401 maps to `HOSTED_TOKEN_INVALID` and 403 to `HOSTED_PERMISSION_REQUIRED`; Render personal API keys have the provider's available workspace access rather than invented per-action scopes. Errors contain fixed local codes; provider response bodies are never forwarded.
 
 ## Manager wire
 
@@ -33,7 +33,7 @@ Required token access: Cloudflare account listing and Pages edit access to the s
 
 ## Optional free Render runtime
 
-The built-in source is the official `https://github.com/ExhibitOS/platform` main branch. Web services use native Node, explicit `plan:free`, one instance, no disk/autoscaling, `autoDeployTrigger:off`, `npm ci && npm run build`, `node scripts/render-runtime.mjs`, and `/health`. A missing plan would default to a paid plan in the Render API, so it is never omitted. Existing service reuse checks owner/name/free plan/source and the requested durable environment values; no arbitrary foreign service configuration is adopted or changed.
+The built-in source is the official `https://github.com/ExhibitOS/platform` main branch. Web services use native Node, explicit `plan:free`, one instance, no disk/autoscaling, `autoDeployTrigger:off`, `npm ci && npm run build`, `node scripts/render-runtime.mjs`, and `/api/v1/readiness`. A missing plan would default to a paid plan in the Render API, so it is never omitted. Existing service reuse checks owner/name/free plan/source and the requested durable environment values; no arbitrary foreign service configuration is adopted or changed.
 
 The native caller must persist and inject `CLIENT_ORIGIN` (Pages origin), `TENANT_ID`, `ADMIN_SUBJECT`, `ADMIN_PASSWORD`, and `FREEZE_SIGNING_KEY_BASE64` through memory-only `runtime.envVars:[{key,value}]`. These are not renderer fields. Render's own external origin is available to the runtime. The adapter refuses creation before this configuration is present. Root runtime integration must verify that configuration, signing identity, published blobs and authentication actually survive restarts; service creation alone is not evidence of those properties.
 
@@ -53,3 +53,5 @@ Official sources checked 2026-10-17:
 - [BLAKE3 specification](https://github.com/BLAKE3-team/BLAKE3-specs/blob/master/blake3.pdf) and [official test vectors](https://github.com/BLAKE3-team/BLAKE3/blob/master/test_vectors/test_vectors.json)
 - [Render OpenAPI source](https://api-docs.render.com/openapi/render-public-api-1.json), [workspace API](https://api-docs.render.com/reference/list-owners), [service creation](https://api-docs.render.com/reference/create-service), [Postgres creation](https://api-docs.render.com/reference/create-postgres)
 - [Render free environment limitations](https://render.com/docs/free)
+
+Explicit serviceId/postgresId selections are fetched by ID and must belong to the selected workspace and free plan. A conflicting selection fails without substitution or overwrite. Existing Postgres selections must match PostgreSQL18/Frankfurt; existing services must match the official native Node source/readiness endpoint and durable environment.
