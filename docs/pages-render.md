@@ -75,3 +75,5 @@ Official protocol references: [Pages advanced mode and ASSETS](https://developer
 Account discovery reference: [List Memberships](https://developers.cloudflare.com/api/resources/memberships/methods/list/).
 
 Rejected Pages requests return only `HOSTED_CF_<fixed stage>_HTTP_<status>[_CODE_<numeric provider code>]`. Stages are project read/create, upload token, asset check/upload/upsert and deployment list/create/status. Only 200 rejection or bounded 4xx rejection is classified; transport/5xx write uncertainty retains the existing reconciliation policy. Remote messages, URLs, paths, headers, account IDs and tokens never cross this diagnostic boundary. Use GET-only reconcile before considering another explicit write after a failure.
+
+Cloudflare reconcile reads the project first, then reads its deployment list. Missing/rejected project and rejected deployment-list requests therefore have separate fixed diagnostic stages, without any create or upload retry.
