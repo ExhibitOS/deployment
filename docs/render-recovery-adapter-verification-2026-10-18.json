@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-18",
+  "task": "T10-05",
+  "baseCommit": "15381b9518da803b1f463682e2723155549d16ab",
+  "status": "INTERNAL_GET_ONLY_RECOVERY_BRIDGE_IMPLEMENTED_NATIVE_AND_REMOTE_FLOW_NOT_CONNECTED",
+  "checks": {
+    "node": "24.21.0",
+    "focusedTests": 6,
+    "passed": 6,
+    "toolChunk": "806eb9",
+    "exit": 0,
+    "milliseconds": 96.885708,
+    "fixture": "synthetic HTTP response and executor stand-in",
+    "diffCheck": "PASS"
+  },
+  "preserved": [
+    "executeHosted original six-action public wire",
+    "provider transport redacted errors/timeouts/no-redirect",
+    "free plan only",
+    "no automatic IP,stop,resume,resource deletion or paid actions"
+  ],
+  "notRun": [
+    "actual API/token/DB",
+    "writer quiescence",
+    "TLS connection",
+    "pg_dump/encryption/independent restore",
+    "native Manager UI",
+    "migration/update/rollback"
+  ],
+  "sources": [
+    {
+      "path": "src/pages-render.mjs",
+      "bytes": 33746,
+      "sha256": "93a9b876e5c1b615ebc45ad1e536e298e53cf0d7a62cfa309be62814963a1561"
+    },
+    {
+      "path": "tests/render-recovery.test.mjs",
+      "bytes": 5036,
+      "sha256": "71fde56bde263f3786924537195eade419c6857148684494b0c8e90d33dd23b6"
+    },
+    {
+      "path": "docs/pages-render.md",
+      "bytes": 16973,
+      "sha256": "eea76df1318979b063e0d270ad50cd63df711a20b6d90fe87f007f5d667cac2d"
+    }
+  ]
+}

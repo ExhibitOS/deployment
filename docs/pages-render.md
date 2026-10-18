@@ -81,3 +81,26 @@ Cloudflare reconcile reads the project first, then reads its deployment list. Mi
 Deployment history uses `per_page=20&page=N`, matching the official example page size, and reads numeric `result_info.total_pages` when supplied. Without page metadata it continues full pages until a short page; a 100-page scan limit fails closed rather than assuming no deployment exists. The earlier single `per_page=100` request was rejected in a real account with numeric code8000024. The official reference does not state a maximum or define that numeric code, so no universal limit is claimed. Reference: [List Pages deployments](https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/deployments/methods/list/).
 
 The optional `onStage` diagnostic callback receives only a closed set of local request/build stages. Stage selection does not use response messages, URLs or account identifiers; form construction is marked before creating FormData. It changes no request data or retry policy.
+
+## Private recovery adapter (2026-10-18)
+
+`withRenderRecoveryConnection` is an internal native-executor bridge, outside
+`executeHosted`'s public six-action wire. It observes only GET endpoints: selected
+free PostgreSQL18 and owner, matching service DATABASE_URL, actual service
+suspension, expiry, exact operator-confirmed `/32` or `/128` IP entry and explicit
+confirmation that other writers stopped. It passes the external connection only
+to an in-process callback with mandatory certificate/hostname verification. It
+returns a strictly projected encrypted-backup receipt and rechecks suspension.
+It neither suspends/resumes resources nor changes network rules. Callback errors
+and malformed results use fixed redacted codes.
+
+Six synthetic Node unit cases qualify that routing/guard boundary only. Real
+Render access, TLS, DB identity/snapshot privileges, stopped-writer enforcement,
+pg_dump, encrypted local backup, independent restore and Manager UI remain
+unqualified. An empty IP list blocks external access; the bridge never replaces
+it with allow-all or discovers public IP through a third service. If necessary,
+a user must authorize/add a narrow range in the official Render screen. This is
+not a completed remote recovery product flow or a replacement for T10-05's
+update/interruption/restore/rollback checks. Existing local Manager installation
+archives and hosted DB archives have different configuration roles; never forge
+local installation records to make one appear to be the other.
