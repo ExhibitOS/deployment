@@ -2,22 +2,25 @@
   "date": "2026-10-18",
   "task": "T10-05",
   "baseCommit": "15381b9518da803b1f463682e2723155549d16ab",
-  "status": "INTERNAL_GET_ONLY_RECOVERY_BRIDGE_IMPLEMENTED_NATIVE_AND_REMOTE_FLOW_NOT_CONNECTED",
+  "status": "PRIVATE_LOAD_ONLY_EXPECTED_CONFIGURATION_FENCE_SYNTHETIC_PASS_ACTUAL_REMOTE_NOT_RUN",
   "checks": {
     "node": "24.21.0",
-    "focusedTests": 6,
-    "passed": 6,
-    "toolChunk": "806eb9",
+    "focusedTests": 8,
+    "passed": 8,
+    "toolChunk": "49f6e3",
     "exit": 0,
-    "milliseconds": 96.885708,
-    "fixture": "synthetic HTTP response and executor stand-in",
+    "milliseconds": 167.812667,
+    "fixture": "synthetic provider GET responses and executor stand-in; ephemeral synthetic Ed25519 only",
     "diffCheck": "PASS"
   },
   "preserved": [
     "executeHosted original six-action public wire",
     "provider transport redacted errors/timeouts/no-redirect",
     "free plan only",
-    "no automatic IP,stop,resume,resource deletion or paid actions"
+    "no automatic IP,stop,resume,resource deletion or paid actions",
+    "public executeHosted unchanged; original private backup receipt schema unchanged",
+    "original admin/signing secrets never passed to helper or public result",
+    "optional static triplet all/none; no current-export substitution"
   ],
   "notRun": [
     "actual API/token/DB",
@@ -25,23 +28,26 @@
     "TLS connection",
     "pg_dump/encryption/independent restore",
     "native Manager UI",
-    "migration/update/rollback"
+    "migration/update/rollback",
+    "native Keychain load-only and original protected configuration",
+    "backup-time immutable configuration preservation",
+    "DB freeze-authority match and active deploy/commit/runtime artifact binding"
   ],
   "sources": [
     {
       "path": "src/pages-render.mjs",
-      "bytes": 33746,
-      "sha256": "93a9b876e5c1b615ebc45ad1e536e298e53cf0d7a62cfa309be62814963a1561"
+      "bytes": 37702,
+      "sha256": "4effff724ea19b5e15b586b2968d93aaa8a5638a0adf906004fbca4c1b94caa4"
     },
     {
       "path": "tests/render-recovery.test.mjs",
-      "bytes": 5036,
-      "sha256": "71fde56bde263f3786924537195eade419c6857148684494b0c8e90d33dd23b6"
+      "bytes": 9195,
+      "sha256": "d5d95d7d948d697a426ff4a2b8850da74adb739fced80657ee8da159cb3e8c78"
     },
     {
       "path": "docs/pages-render.md",
-      "bytes": 16973,
-      "sha256": "eea76df1318979b063e0d270ad50cd63df711a20b6d90fe87f007f5d667cac2d"
+      "bytes": 18899,
+      "sha256": "c206895e20c655c4a3e39b46e7a55879adb4715bae5e3928cdb940499a6deb43"
     }
   ]
 }

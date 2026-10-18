@@ -104,3 +104,34 @@ not a completed remote recovery product flow or a replacement for T10-05's
 update/interruption/restore/rollback checks. Existing local Manager installation
 archives and hosted DB archives have different configuration roles; never forge
 local installation records to make one appear to be the other.
+
+### Load-only original configuration fence
+
+The private recovery bridge now also requires native-loaded
+`expectedConfiguration={envVars,origin}`. Its5 required values are the existing
+CLIENT_ORIGIN, TENANT_ID, ADMIN_SUBJECT, ADMIN_PASSWORD and
+FREEZE_SIGNING_KEY_BASE64. Existing STATIC publication/revision/index pins are
+all present or all absent; missing values are never supplied from the currently
+selected export. Validation reuses existing auth/Pages ID and URL limits and
+requires an Ed25519 PKCS8 key. It derives the public key/keyId without returning
+private key bytes.
+
+Before invoking the executor, the observed service's private env-vars must match
+the original values and authority exactly, with its AUTH_ORIGIN, configured
+RENDER_EXTERNAL_URL or verified service URL matching the original origin. Duplicate
+reserved fields, missing/partial pins, wrong tenant/admin/client/key or origin
+fail closed. Env-vars and suspension are rechecked afterward. These are GET-only
+observations; the original signing key/admin password remain inside the
+native-to-runner/provider comparison boundary and are not supplied to the backup
+helper, archive, renderer or projected receipt. Missing/malformed protected source
+configuration yields HOSTED_RECOVERY_CONFIGURATION_REQUIRED; a remote mismatch
+yields HOSTED_RECOVERY_CONFIGURATION_CHANGED. These are fixed codes, not provider
+response text.
+
+Eight synthetic tests cover the extended fence. No real Keychain/Render values
+were read. A mutable runtime-Keychain entry is not an immutable backup-time
+configuration snapshot: job-bound protected configuration preservation, database
+freeze-authority confirmation, active deploy ID/commit, trusted runtime artifacts,
+Pages restoration and activation/update/rollback remain unimplemented/unverified.
+The Platform's separate real local TLS/SQL/crypto qualification does not establish
+actual provider or native load-only behavior.
