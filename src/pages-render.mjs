@@ -145,6 +145,7 @@ function admittedFreePostgres(db,identity,{selectedId,expectedName}={}){
  return projectDatabase(db);
 }
 export async function createFreePostgres(request,options){
+ if(options?.onPostgresCreated!==undefined&&typeof options.onPostgresCreated!=='function')fail('HOSTED_REQUEST_INVALID');
  const api=transport('render',options),identity=renderIdentity(request),dbName=identity.name+'-db';
  if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');return admittedFreePostgres(await api('/postgres/'+request.postgresId),identity,{selectedId:request.postgresId});}
  let db=await uniqueResource(api,'postgres',identity.ownerId,dbName);
@@ -167,9 +168,14 @@ export async function createFreePostgres(request,options){
   if(expires===undefined||expires>Date.now())fail('HOSTED_RESOURCE_CONFLICT');
  }
 
- try{db=await api('/postgres',{method:'POST',body:{name:dbName,ownerId:identity.ownerId,plan:'free',version:'18',region:'frankfurt',enableHighAvailability:false,enableDiskAutoscaling:false,ipAllowList:[]}});}
+ let created=false;
+ try{db=await api('/postgres',{method:'POST',body:{name:dbName,ownerId:identity.ownerId,plan:'free',version:'18',region:'frankfurt',enableHighAvailability:false,enableDiskAutoscaling:false,ipAllowList:[]}});created=true;}
  catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(!db)fail('HOSTED_RESULT_UNCERTAIN');}
- return admittedFreePostgres(db,identity,{expectedName:dbName});
+ const candidate=admittedFreePostgres(db,identity,{expectedName:dbName});
+ // Only the actual successful POST response establishes this acquisition event.
+ // Same-name discovery or a lost-response reconciliation never grants it.
+ if(created&&options?.onPostgresCreated){try{await options.onPostgresCreated({id:db.id,ownerId:identity.ownerId,name:dbName});}catch{fail('HOSTED_RESULT_UNCERTAIN');}}
+ return candidate;
 }
 
 const REQUIRED_ENV=['CLIENT_ORIGIN','TENANT_ID','ADMIN_SUBJECT','ADMIN_PASSWORD','FREEZE_SIGNING_KEY_BASE64'];

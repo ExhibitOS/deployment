@@ -169,3 +169,5 @@ Status names and a `creating` success response follow the official
 and [retrieval schema](https://api-docs.render.com/reference/retrieve-postgres).
 
 Provider expiry values must be RFC3339 date-times with an explicit timezone and a valid calendar date. Legacy date strings, timezone omissions and calendar rollover are rejected rather than interpreted as proof of expiration or displayed as a confirmed provider expiry. This adds no resource creation, deletion or paid fallback.
+
+The native recovery caller may pass an optional in-process `onPostgresCreated({id, ownerId, name})` hook to bind its private operation journal to an admitted, successful creation POST response. The hook is awaited, receives no credentials, and does not change the public six-action request/result wire. Selected or same-name discoveries and lost-response GET reconciliation never emit this creation event. Hook persistence failure reports fixed uncertainty without repeating creation. Discovering a database is not proof that the current operation created it or permission to change its IP rules.

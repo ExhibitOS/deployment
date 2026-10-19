@@ -50,3 +50,29 @@ test('valid leap calendar and explicit timezone normalize without guessing expir
   assert.equal(result.expiresAt,new Date(expiresAt).toISOString());assert.equal(posts,0);
  }
 });
+
+
+test('native creation hook receives only a validated actual POST identity',async()=>{
+ const observed=[];let posts=0;
+ const result=await createFreePostgres(request,{...options(async(url,init)=>{if(init.method==='GET')return reply([]);posts++;return reply(db);}),onPostgresCreated:async value=>{observed.push(value);}});
+ assert.equal(posts,1);assert.deepEqual(observed,[{id:db.id,ownerId:request.workspaceId,name:db.name}]);assert.deepEqual(Object.keys(result).sort(),['expiresAt','id','name','plan','status']);
+});
+test('selected, discovered and lost-response candidates never emit actual-creation provenance',async()=>{
+ for(const kind of ['selected','named','late','lost']){
+  let gets=0,posts=0,hooks=0;
+  const result=await createFreePostgres({...request,...(kind==='selected'?{postgresId:db.id}:{})},{...options(async(url,init)=>{
+   if(init.method==='POST'){posts++;throw Error('synthetic lost reply');}
+   gets++;return reply(kind==='selected'?db:kind==='named'?[{postgres:db}]:kind==='late'?(gets===1?[]:[{postgres:db}]):(gets<=2?[]:[{postgres:db}]));
+  }),onPostgresCreated:()=>{hooks++;}});
+  assert.equal(result.id,db.id);assert.equal(hooks,0);assert.equal(posts,kind==='lost'?1:0);
+ }
+});
+test('creation provenance persistence failure is uncertain without a second POST or credential message',async()=>{
+ let posts=0,hooks=0;
+ await assert.rejects(createFreePostgres(request,{...options(async(url,init)=>{if(init.method==='GET')return reply([]);posts++;return reply(db);}),onPostgresCreated:()=>{hooks++;throw Error('synthetic-private-value');}}),/^Error: HOSTED_RESULT_UNCERTAIN$/);
+ assert.equal(posts,1);assert.equal(hooks,1);
+});
+test('malformed creation hook and rejected POST response cannot emit creation provenance',async()=>{
+ let calls=0;await assert.rejects(createFreePostgres(request,{...options(async()=>{calls++;return reply(db);}),onPostgresCreated:true}),/^Error: HOSTED_REQUEST_INVALID$/);assert.equal(calls,0);
+ let hooks=0,posts=0;await assert.rejects(createFreePostgres(request,{...options(async(url,init)=>{if(init.method==='GET')return reply([]);posts++;return reply({...db,owner:{id:'tea-other'}});}),onPostgresCreated:()=>{hooks++;}}),/^Error: HOSTED_RESOURCE_CONFLICT$/);assert.equal(posts,1);assert.equal(hooks,0);
+});
