@@ -125,7 +125,43 @@ async function uniqueResource(api,kind,ownerId,name){const matches=(await render
 function projectDatabase(db){const expiry=typeof db.expiresAt==='string'&&!Number.isNaN(Date.parse(db.expiresAt))?new Date(db.expiresAt).toISOString():undefined;return {id:db.id,name:safeName(db.name),plan:'free',status:db.status==='available'?'available':db.status==='creating'?'creating':'unavailable',...(expiry?{expiresAt:expiry}:{})};}
 function projectService(service){const url=publicURL(service.serviceDetails?.url,'onrender.com');return {id:service.id,name:safeName(service.name),plan:'free',...(url?{url}:{})};}
 function assertFree(resource,kind){if(!id(resource?.id)||(kind==='services'?resource.serviceDetails?.plan:resource.plan)!=='free')fail('HOSTED_PAID_PLAN_REFUSED');return resource;}
-export async function createFreePostgres(request,options){const api=transport('render',options),identity=renderIdentity(request),dbName=identity.name+'-db';let db;if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');db=await api('/postgres/'+request.postgresId);assertFree(db,'postgres');if(db.owner?.id!==identity.ownerId||db.region!=='frankfurt'||db.version!=='18')fail('HOSTED_RESOURCE_CONFLICT');return projectDatabase(db);}db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(db)return projectDatabase(assertFree(db,'postgres'));try{db=await api('/postgres',{method:'POST',body:{name:dbName,ownerId:identity.ownerId,plan:'free',version:'18',region:'frankfurt',enableHighAvailability:false,enableDiskAutoscaling:false,ipAllowList:[]}});}catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(!db)fail('HOSTED_RESULT_UNCERTAIN');}assertFree(db,'postgres');if(db.name!==dbName||db.owner?.id!==identity.ownerId)fail('HOSTED_RESOURCE_CONFLICT');return projectDatabase(db);}
+// Selected/reconciled resources must meet the same contract as newly requested ones.
+function admittedFreePostgres(db,identity,{selectedId,expectedName}={}){
+ assertFree(db,'postgres');
+ if(db.owner?.id!==identity.ownerId||db.region!=='frankfurt'||db.version!=='18'||selectedId&&db.id!==selectedId||expectedName&&db.name!==expectedName)fail('HOSTED_RESOURCE_CONFLICT');
+ if(db.expiresAt!==undefined&&(typeof db.expiresAt!=='string'||!Number.isFinite(Date.parse(db.expiresAt))))fail('HOSTED_RESPONSE_INVALID');
+ if(db.expiresAt!==undefined&&Date.parse(db.expiresAt)<=Date.now())fail('HOSTED_RECOVERY_DATABASE_EXPIRED');
+ if(!['creating','available'].includes(db.status))fail('HOSTED_RESOURCE_CONFLICT');
+ return projectDatabase(db);
+}
+export async function createFreePostgres(request,options){
+ const api=transport('render',options),identity=renderIdentity(request),dbName=identity.name+'-db';
+ if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');return admittedFreePostgres(await api('/postgres/'+request.postgresId),identity,{selectedId:request.postgresId});}
+ let db=await uniqueResource(api,'postgres',identity.ownerId,dbName);
+ if(db)return admittedFreePostgres(db,identity,{expectedName:dbName});
+ // Render allows one active free PostgreSQL instance per workspace. Never POST
+ // another candidate when a free instance is active/uncertain; no deletion/upgrade.
+ // Re-read exact operation name in the full list to preserve lost-response reuse.
+ const listed=await renderList(api,'postgres','&ownerId='+encodeURIComponent(identity.ownerId));
+ if(listed.some(r=>!id(r.id)||!id(r.owner?.id)||typeof r.plan!=='string'||!r.plan))fail('HOSTED_RESPONSE_INVALID');
+ const owned=listed.filter(r=>r.owner.id===identity.ownerId);
+ const same=owned.filter(r=>r.name===dbName);
+ if(same.length>1)fail('HOSTED_RESOURCE_CONFLICT');
+ if(same.length===1)return admittedFreePostgres(same[0],identity,{expectedName:dbName});
+ // A valid provider expiry is the only inactivity proof. A suspended or
+ // unavailable status alone never releases a slot, nor does a missing expiry.
+ const knownStatus=new Set(['creating','available','unavailable','config_restart','suspended','maintenance_scheduled','maintenance_in_progress','recovery_failed','recovery_in_progress','updating_instance']);
+ for(const retained of owned.filter(r=>r.plan==='free')){
+  if(!knownStatus.has(retained.status))fail('HOSTED_RESOURCE_CONFLICT');
+  if(retained.expiresAt!==undefined&&(typeof retained.expiresAt!=='string'||!Number.isFinite(Date.parse(retained.expiresAt))))fail('HOSTED_RESPONSE_INVALID');
+  if(retained.expiresAt===undefined||Date.parse(retained.expiresAt)>Date.now())fail('HOSTED_RESOURCE_CONFLICT');
+ }
+
+ try{db=await api('/postgres',{method:'POST',body:{name:dbName,ownerId:identity.ownerId,plan:'free',version:'18',region:'frankfurt',enableHighAvailability:false,enableDiskAutoscaling:false,ipAllowList:[]}});}
+ catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(!db)fail('HOSTED_RESULT_UNCERTAIN');}
+ return admittedFreePostgres(db,identity,{expectedName:dbName});
+}
+
 const REQUIRED_ENV=['CLIENT_ORIGIN','TENANT_ID','ADMIN_SUBJECT','ADMIN_PASSWORD','FREEZE_SIGNING_KEY_BASE64'];
 function runtimeEnv(options,{database=false}={}){const env=options.runtime?.envVars;if(!Array.isArray(env)||![...REQUIRED_ENV,...(database?['DATABASE_URL']:[])].every(k=>env.some(e=>e.key===k&&typeof e.value==='string'&&e.value.length>0))||env.some(e=>!object(e)||typeof e.key!=='string'||!(/^[A-Z][A-Z0-9_]{0,63}$/.test(e.key))||typeof e.value!=='string'||e.value.length>32768||/[\0]/.test(e.value))||new Set(env.map(e=>e.key)).size!==env.length)fail('RENDER_CONFIGURATION_REQUIRED');if(!publicURL(env.find(e=>e.key==='CLIENT_ORIGIN').value,'pages.dev'))fail('RENDER_CONFIGURATION_REQUIRED');return env;}
 

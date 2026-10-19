@@ -135,3 +135,35 @@ freeze-authority confirmation, active deploy ID/commit, trusted runtime artifact
 Pages restoration and activation/update/rollback remain unimplemented/unverified.
 The Platform's separate real local TLS/SQL/crypto qualification does not establish
 actual provider or native load-only behavior.
+
+### Free PostgreSQL acquisition and retry admission
+
+Before a new PostgreSQL POST, the existing deploy adapter lists the selected
+workspace's retained databases. It reuses the exact operation project name if
+that candidate appears after the initial lookup. Another active or uncertain free database
+causes `HOSTED_RESOURCE_CONFLICT` before POST: preserve it and review the selected
+workspace/database; the adapter never deletes it, switches workspaces, or upgrades
+plans. Explicit ID and same-name retry reuse both verify owner, free plan,
+Frankfurt region, PostgreSQL18, supported creating/available state and any reported
+expiry. An uncertain POST is reconciled by the same exact-name lookup, without a
+second POST. The list/read check is not an atomic reservation; concurrent external
+creation can still cause a provider refusal, and no retry invents completion.
+
+This admission is shared by the existing deploy route. It does not prove a
+restoration target is empty, bind a remote restoration operation, import SQL,
+activate a restored service, or complete remote backup/update/rollback. Those
+steps remain separate from the existing isolated local restore-check job. [Render’s free-instance limit](https://render.com/docs/free#single-instance-limit)
+permits only one active free PostgreSQL instance per workspace; expiry and retained
+resources must be reviewed without deleting the source or enabling paid plans.
+
+A different retained database with a valid provider `expiresAt` at or before the
+current time does not permanently consume the local admission slot. Its status
+must still be a recognized provider state; missing/malformed expiry or unknown
+status never proves inactivity. The adapter may then request one new free
+instance while leaving the expired source untouched. Render can still reject the
+request; this is not a guarantee of account eligibility or quota availability.
+An explicitly selected or same-operation-name expired ID returns
+`HOSTED_RECOVERY_DATABASE_EXPIRED`, never automatic replacement or deletion.
+Status names and a `creating` success response follow the official
+[Postgres creation schema](https://api-docs.render.com/reference/create-postgres)
+and [retrieval schema](https://api-docs.render.com/reference/retrieve-postgres).
