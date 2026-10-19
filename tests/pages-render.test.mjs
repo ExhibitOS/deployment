@@ -99,3 +99,23 @@ test('unknown retry outcome cannot be resolved by the same old failed attempt or
  const result=await executeHosted({...req,sourcePath:root},{tokens,fetch:async(url,init)=>{if(url.endsWith('/exhibitos-test'))return reply({name:'exhibitos-test'});if(url.includes('/deployments?'))return reply([production('dep-old-failed',commit,'failure')]);if(url.endsWith('/upload-token'))return reply({jwt:'UPLOAD_JWT'});if(url.endsWith('/check-missing'))return reply([]);if(url.endsWith('/upsert-hashes'))return reply({});posts++;throw Error('synthetic unknown create');}});
  assert.equal(posts,1);assert.equal(result.state,'uncertain');assert.equal(result.deploymentId,'pending-'+commit);
 });
+
+for(const scenario of ['foreign repo','wrong durable env','matching service'])test(`Render lost service create reconciles ${scenario} through existing admission`,async()=>{
+ const envVars=[{key:'DATABASE_URL',value:'postgresql://synthetic/expected'},{key:'CLIENT_ORIGIN',value:'https://exhibitos-test.pages.dev'},{key:'TENANT_ID',value:'synthetic-tenant'},{key:'ADMIN_SUBJECT',value:'synthetic-owner'},{key:'ADMIN_PASSWORD',value:'synthetic-password'},{key:'FREEZE_SIGNING_KEY_BASE64',value:'synthetic-key'}];
+ const service={id:'srv-reconciled',name:'exhibitos-test',ownerId:'tea-one',type:'web_service',repo:scenario==='foreign repo'?'https://github.com/example/unrelated':'https://github.com/ExhibitOS/platform',serviceDetails:{plan:'free',runtime:'node',healthCheckPath:'/api/v1/readiness',url:'https://exhibitos-test.onrender.com'}};
+ const calls=[];let lists=0,envReads=0,posts=0;
+ const fetch=async(url,init)=>{
+  calls.push(init.method);
+  if(init.method==='POST'){posts++;throw Error('synthetic lost service create response');}
+  if(url.includes('/services?')){lists++;return reply(lists===1?[]:[{service}],200,false);}
+  if(url.endsWith('/services/srv-reconciled/env-vars?limit=100')){envReads++;return reply(envVars.map(envVar=>({envVar:scenario==='wrong durable env'&&envVar.key==='DATABASE_URL'?{...envVar,value:'postgresql://synthetic/unrelated'}:envVar})),200,false);}
+  throw Error('Unexpected synthetic service reconcile read');
+ };
+ const request=createFreeService({workspaceId:'tea-one',projectName:'exhibitos-test'},{tokens,runtime:{envVars},fetch});
+ if(scenario==='matching service')assert.equal((await request).id,'srv-reconciled');
+ else await assert.rejects(request,/^Error: HOSTED_RESOURCE_CONFLICT$/);
+ assert.equal(posts,1,'An uncertain create is never automatically sent again');
+ assert.equal(lists,2);
+ assert.equal(envReads,scenario==='foreign repo'?0:1);
+ assert.deepEqual(calls,scenario==='foreign repo'?['GET','POST','GET']:['GET','POST','GET','GET']);
+});
