@@ -167,3 +167,5 @@ An explicitly selected or same-operation-name expired ID returns
 Status names and a `creating` success response follow the official
 [Postgres creation schema](https://api-docs.render.com/reference/create-postgres)
 and [retrieval schema](https://api-docs.render.com/reference/retrieve-postgres).
+
+Provider expiry values must be RFC3339 date-times with an explicit timezone and a valid calendar date. Legacy date strings, timezone omissions and calendar rollover are rejected rather than interpreted as proof of expiration or displayed as a confirmed provider expiry. This adds no resource creation, deletion or paid fallback.

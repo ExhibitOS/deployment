@@ -29,3 +29,24 @@ test('missing or invalid expiry and unknown status never prove an inactive quota
 test('same-operation expired resource is never silently replaced even when suspended',async()=>{
  for(const selected of [false,true]){let posts=0;await assert.rejects(createFreePostgres({...request,...(selected?{postgresId:db.id}:{})},options(async(url,init)=>{if(init.method==='POST')posts++;const expired={...db,status:'suspended',expiresAt:'2000-01-01T00:00:00Z'};return reply(selected?expired:[{postgres:expired}]);})),/^Error: HOSTED_RECOVERY_DATABASE_EXPIRED$/);assert.equal(posts,0);}
 });
+
+
+test('legacy dates, timezone omissions and invalid calendar dates never establish expiry',async()=>{
+ for(const expiresAt of ['0','01/01/2000','2000-01-01','2000-01-01T00:00:00','2000-02-30T00:00:00Z','1900-02-29T00:00:00Z','2000-01-01T24:00:00Z','2000-01-01T00:00:00+24:00','2099-02-29T00:00:00Z']){
+  for(const selected of [false,true]){
+   let gets=0,posts=0;
+   await assert.rejects(createFreePostgres({...request,...(selected?{postgresId:db.id}:{})},options(async(url,init)=>{
+    if(init.method==='POST')posts++;
+    if(selected)return reply({...db,expiresAt});
+    gets++;return reply(gets===1?[]:[{postgres:{...db,id:'dpg-original',name:'original-source-db',status:'suspended',expiresAt}}]);
+   })),/^Error: HOSTED_RESPONSE_INVALID$/);
+   assert.equal(posts,0);
+  }
+ }
+});
+test('valid leap calendar and explicit timezone normalize without guessing expiry',async()=>{
+ for(const expiresAt of ['2096-02-29T04:05:06.123456Z','2096-02-29T04:05:06.123456789012Z','2099-01-01T01:00:00+01:00']){
+  let posts=0;const result=await createFreePostgres({...request,postgresId:db.id},options(async(url,init)=>{if(init.method==='POST')posts++;return reply({...db,expiresAt});}));
+  assert.equal(result.expiresAt,new Date(expiresAt).toISOString());assert.equal(posts,0);
+ }
+});
