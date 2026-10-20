@@ -178,3 +178,42 @@ The native recovery caller may pass an optional in-process `onPostgresCreated({i
 `executeHosted` accepts Render `connect-existing` with explicit `workspaceId`, `serviceId`, `postgresId`, and the original `projectName`. The native caller must load that project's existing runtime configuration into `options.runtime.envVars`; this action never creates configuration or infers the original project from a service name. Four authenticated GETs observe the selected Postgres, service, Postgres connection-info, and service environment. Free ownership, PostgreSQL18 availability/expiry, platform Node service identity/readiness path, original configuration and exact database URL pairing must match.
 
 The returned `ready` receipt identifies an observed connection, not a live deploy, backup or recovery point. It contains only public identifiers, origin and optional expiry. Both running and suspended services can be connected; no service suspension, IP change, SQL connection, resource creation or key generation occurs. The caller separately stores connection metadata and preserves unrelated publication history. Backup execution must still revalidate current source and all existing writer/network/key admission conditions.
+
+### Isolated Pages cleanup procedure
+
+The first-release adapter and Manager do not issue remote DELETE requests;
+`disconnect` only removes the local provider connection. Cleanup is an explicit
+operator action through the official provider API. A successful deployment,
+reconciliation, or preserved resource is not evidence that cleanup ran.
+
+1. Use an explicitly authorized isolated account and a uniquely named, empty
+   temporary Pages project designated for the cleanup check. Confirm the current
+   account's cost/quota conditions before creation; do not change billing or add
+   Functions, storage, a Git integration, or a custom domain. Existing reference
+   exhibitions, original data, keys, and backups are outside this procedure.
+2. Record the exact account, project name, returned project ID and creation time
+   from the successful creation response. Check absence before creation. If that
+   write is uncertain, observe the exact target and retain it; do not repeat the
+   POST or infer that a same-name project belongs to this operation.
+3. Before deletion, re-read that exact project. Match the recorded identity and
+   confirm that it still has no deployments, custom domains, connected source,
+   secrets or resource bindings. A mismatch, new content, or incomplete read
+   stops cleanup. An unconfirmed creation or discovery alone is not ownership.
+4. Obtain authorization for irreversible deletion of this exact temporary
+   target. With the existing account token held only in the authorized client's
+   memory, issue `DELETE /accounts/{account_id}/pages/projects/{project_name}`
+   at `https://api.cloudflare.com/client/v4`. This permanently deletes the
+   project and any deployments; do not apply it to a retained exhibition.
+5. Record the redacted deletion result and an authorized follow-up observation
+   confirming the exact project's absence. A timeout, permission failure or
+   ambiguous response is unresolved; do not blindly retry deletion or broaden
+   the target. Retain the creation/deletion evidence and the independent free
+   apply/resource-preservation evidence at their actual scopes.
+
+This documents the destroy procedure, not a completed cleanup run or permission
+to use an unapproved account. Render service/Postgres deletion is outside this
+procedure. Tokens and raw provider bodies must not enter logs or evidence.
+See Cloudflare's [project creation](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/create/),
+[project observation](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/get/),
+[permanent project deletion](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/delete/),
+and [current Pages limits](https://developers.cloudflare.com/pages/platform/limits/).
