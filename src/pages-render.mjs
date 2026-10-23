@@ -1,7 +1,7 @@
 // Copyright 2026 ExhibitOS contributors. SPDX-License-Identifier: Apache-2.0
 import {readFile,lstat,readdir,realpath} from 'node:fs/promises';
 import {resolve,join,extname,isAbsolute} from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,createPrivateKey,createPublicKey} from 'node:crypto';
 import {pagesAssetHash} from './pages-asset-hash.mjs';
 import {pagesDeploymentIdentity,appendPagesProxy,dynamicPublicationHTML} from './pages-render-worker.mjs';
 const CF='https://api.cloudflare.com/client/v4',RENDER='https://api.render.com/v1';
@@ -122,20 +122,79 @@ async function cloudflare(request,options){const api=transport('cloudflare',opti
 async function renderList(api,kind,query=''){const all=[];let cursor;for(let page=0;page<100;page++){const data=await api(`/${kind}?limit=100${query}${cursor?'&cursor='+encodeURIComponent(cursor):''}`);if(!Array.isArray(data))fail('HOSTED_RESPONSE_INVALID');for(const item of data){const resource=item[kind==='owners'?'owner':kind==='services'?'service':'postgres'];if(!object(resource))fail('HOSTED_RESPONSE_INVALID');all.push(resource);}if(data.length<100)return all;const next=data.at(-1)?.cursor;if(!text(next)||next===cursor)fail('HOSTED_RESPONSE_INVALID');cursor=next;}fail('HOSTED_PAGINATION_LIMIT');}
 function renderIdentity(request){if(!id(request.workspaceId)||!name(request.projectName))fail('HOSTED_REQUEST_INVALID');return {ownerId:request.workspaceId,name:request.projectName};}
 async function uniqueResource(api,kind,ownerId,name){const matches=(await renderList(api,kind,'&ownerId='+encodeURIComponent(ownerId)+'&name='+encodeURIComponent(name))).filter(r=>(r.ownerId??r.owner?.id)===ownerId&&r.name===name);if(matches.length>1)fail('HOSTED_RESOURCE_CONFLICT');return matches[0]??null;}
-function projectDatabase(db){const expiry=typeof db.expiresAt==='string'&&!Number.isNaN(Date.parse(db.expiresAt))?new Date(db.expiresAt).toISOString():undefined;return {id:db.id,name:safeName(db.name),plan:'free',status:db.status==='available'?'available':db.status==='creating'?'creating':'unavailable',...(expiry?{expiresAt:expiry}:{})};}
+// Provider timestamps are RFC3339 date-times, not Date.parse's legacy date syntax.
+// Reject calendar rollover too: an invalid provider value cannot prove a free slot.
+function postgresExpiry(value){
+ if(value===undefined)return undefined;
+ const m=typeof value==='string'&&/^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/.exec(value);
+ if(!m)fail('HOSTED_RESPONSE_INVALID');
+ const [year,month,day,hour,minute,second]=m.slice(1).map(Number),leap=year%4===0&&(year%100!==0||year%400===0),days=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];
+ if(month<1||month>12||day<1||day>days[month-1]||hour>23||minute>59||second>59)fail('HOSTED_RESPONSE_INVALID');
+ const instant=Date.parse(value);if(!Number.isFinite(instant))fail('HOSTED_RESPONSE_INVALID');return instant;
+}
+function projectDatabase(db){const instant=postgresExpiry(db.expiresAt),expiry=instant===undefined?undefined:new Date(instant).toISOString();return {id:db.id,name:safeName(db.name),plan:'free',status:db.status==='available'?'available':db.status==='creating'?'creating':'unavailable',...(expiry?{expiresAt:expiry}:{})};}
 function projectService(service){const url=publicURL(service.serviceDetails?.url,'onrender.com');return {id:service.id,name:safeName(service.name),plan:'free',...(url?{url}:{})};}
 function assertFree(resource,kind){if(!id(resource?.id)||(kind==='services'?resource.serviceDetails?.plan:resource.plan)!=='free')fail('HOSTED_PAID_PLAN_REFUSED');return resource;}
-export async function createFreePostgres(request,options){const api=transport('render',options),identity=renderIdentity(request),dbName=identity.name+'-db';let db;if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');db=await api('/postgres/'+request.postgresId);assertFree(db,'postgres');if(db.owner?.id!==identity.ownerId||db.region!=='frankfurt'||db.version!=='18')fail('HOSTED_RESOURCE_CONFLICT');return projectDatabase(db);}db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(db)return projectDatabase(assertFree(db,'postgres'));try{db=await api('/postgres',{method:'POST',body:{name:dbName,ownerId:identity.ownerId,plan:'free',version:'18',region:'frankfurt',enableHighAvailability:false,enableDiskAutoscaling:false,ipAllowList:[]}});}catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(!db)fail('HOSTED_RESULT_UNCERTAIN');}assertFree(db,'postgres');if(db.name!==dbName||db.owner?.id!==identity.ownerId)fail('HOSTED_RESOURCE_CONFLICT');return projectDatabase(db);}
+// Selected/reconciled resources must meet the same contract as newly requested ones.
+function admittedFreePostgres(db,identity,{selectedId,expectedName}={}){
+ assertFree(db,'postgres');
+ if(db.owner?.id!==identity.ownerId||db.region!=='frankfurt'||db.version!=='18'||selectedId&&db.id!==selectedId||expectedName&&db.name!==expectedName)fail('HOSTED_RESOURCE_CONFLICT');
+ const expires=postgresExpiry(db.expiresAt);
+ if(expires!==undefined&&expires<=Date.now())fail('HOSTED_RECOVERY_DATABASE_EXPIRED');
+ if(!['creating','available'].includes(db.status))fail('HOSTED_RESOURCE_CONFLICT');
+ return projectDatabase(db);
+}
+export async function createFreePostgres(request,options){
+ if(options?.onPostgresCreated!==undefined&&typeof options.onPostgresCreated!=='function')fail('HOSTED_REQUEST_INVALID');
+ const api=transport('render',options),identity=renderIdentity(request),dbName=identity.name+'-db';
+ if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');return admittedFreePostgres(await api('/postgres/'+request.postgresId),identity,{selectedId:request.postgresId});}
+ let db=await uniqueResource(api,'postgres',identity.ownerId,dbName);
+ if(db)return admittedFreePostgres(db,identity,{expectedName:dbName});
+ // Render allows one active free PostgreSQL instance per workspace. Never POST
+ // another candidate when a free instance is active/uncertain; no deletion/upgrade.
+ // Re-read exact operation name in the full list to preserve lost-response reuse.
+ const listed=await renderList(api,'postgres','&ownerId='+encodeURIComponent(identity.ownerId));
+ if(listed.some(r=>!id(r.id)||!id(r.owner?.id)||typeof r.plan!=='string'||!r.plan))fail('HOSTED_RESPONSE_INVALID');
+ const owned=listed.filter(r=>r.owner.id===identity.ownerId);
+ const same=owned.filter(r=>r.name===dbName);
+ if(same.length>1)fail('HOSTED_RESOURCE_CONFLICT');
+ if(same.length===1)return admittedFreePostgres(same[0],identity,{expectedName:dbName});
+ // A valid provider expiry is the only inactivity proof. A suspended or
+ // unavailable status alone never releases a slot, nor does a missing expiry.
+ const knownStatus=new Set(['creating','available','unavailable','config_restart','suspended','maintenance_scheduled','maintenance_in_progress','recovery_failed','recovery_in_progress','updating_instance']);
+ for(const retained of owned.filter(r=>r.plan==='free')){
+  if(!knownStatus.has(retained.status))fail('HOSTED_RESOURCE_CONFLICT');
+  const expires=postgresExpiry(retained.expiresAt);
+  if(expires===undefined||expires>Date.now())fail('HOSTED_RESOURCE_CONFLICT');
+ }
+
+ let created=false;
+ try{db=await api('/postgres',{method:'POST',body:{name:dbName,ownerId:identity.ownerId,plan:'free',version:'18',region:'frankfurt',enableHighAvailability:false,enableDiskAutoscaling:false,ipAllowList:[]}});created=true;}
+ catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;db=await uniqueResource(api,'postgres',identity.ownerId,dbName);if(!db)fail('HOSTED_RESULT_UNCERTAIN');}
+ const candidate=admittedFreePostgres(db,identity,{expectedName:dbName});
+ // Only the actual successful POST response establishes this acquisition event.
+ // Same-name discovery or a lost-response reconciliation never grants it.
+ if(created&&options?.onPostgresCreated){try{await options.onPostgresCreated({id:db.id,ownerId:identity.ownerId,name:dbName});}catch{fail('HOSTED_RESULT_UNCERTAIN');}}
+ return candidate;
+}
+
 const REQUIRED_ENV=['CLIENT_ORIGIN','TENANT_ID','ADMIN_SUBJECT','ADMIN_PASSWORD','FREEZE_SIGNING_KEY_BASE64'];
 function runtimeEnv(options,{database=false}={}){const env=options.runtime?.envVars;if(!Array.isArray(env)||![...REQUIRED_ENV,...(database?['DATABASE_URL']:[])].every(k=>env.some(e=>e.key===k&&typeof e.value==='string'&&e.value.length>0))||env.some(e=>!object(e)||typeof e.key!=='string'||!(/^[A-Z][A-Z0-9_]{0,63}$/.test(e.key))||typeof e.value!=='string'||e.value.length>32768||/[\0]/.test(e.value))||new Set(env.map(e=>e.key)).size!==env.length)fail('RENDER_CONFIGURATION_REQUIRED');if(!publicURL(env.find(e=>e.key==='CLIENT_ORIGIN').value,'pages.dev'))fail('RENDER_CONFIGURATION_REQUIRED');return env;}
 
+async function admittedFreeService(api,service,identity,envVars,{expectedName}={}){
+ assertFree(service,'services');
+ if(service.ownerId!==identity.ownerId||expectedName&&service.name!==expectedName||service.type!=='web_service'||service.repo!=='https://github.com/ExhibitOS/platform'||service.serviceDetails?.runtime!=='node'||service.serviceDetails?.healthCheckPath!=='/api/v1/readiness')fail('HOSTED_RESOURCE_CONFLICT');
+ const saved=await api('/services/'+service.id+'/env-vars?limit=100');
+ if(!Array.isArray(saved)||!envVars.every(e=>saved.some(x=>x.envVar?.key===e.key&&x.envVar?.value===e.value)))fail('HOSTED_RESOURCE_CONFLICT');
+ return projectService(service);
+}
 export async function createFreeService(request,options){const api=transport('render',options),identity=renderIdentity(request),envVars=runtimeEnv(options,{database:true});
- let service;if(request.serviceId){if(!id(request.serviceId))fail('HOSTED_REQUEST_INVALID');service=await api('/services/'+request.serviceId);}else service=await uniqueResource(api,'services',identity.ownerId,identity.name);if(service){assertFree(service,'services');if(service.ownerId!==identity.ownerId||service.type!=='web_service'||service.repo!=='https://github.com/ExhibitOS/platform'||service.serviceDetails?.runtime!=='node'||service.serviceDetails?.healthCheckPath!=='/api/v1/readiness')fail('HOSTED_RESOURCE_CONFLICT');const saved=await api('/services/'+service.id+'/env-vars?limit=100');if(!Array.isArray(saved)||!envVars.every(e=>saved.some(x=>x.envVar?.key===e.key&&x.envVar?.value===e.value)))fail('HOSTED_RESOURCE_CONFLICT');return projectService(service);}
- try{const result=await api('/services',{method:'POST',body:{type:'web_service',name:identity.name,ownerId:identity.ownerId,repo:'https://github.com/ExhibitOS/platform',branch:'main',autoDeployTrigger:'off',envVars,serviceDetails:{runtime:'node',plan:'free',region:'frankfurt',numInstances:1,healthCheckPath:'/api/v1/readiness',envSpecificDetails:{buildCommand:'npm ci && npm run build',startCommand:'node scripts/render-runtime.mjs'}}}});service=result.service??result;}catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;service=await uniqueResource(api,'services',identity.ownerId,identity.name);if(!service)fail('HOSTED_RESULT_UNCERTAIN');}assertFree(service,'services');if(service.name!==identity.name||service.ownerId!==identity.ownerId)fail('HOSTED_RESOURCE_CONFLICT');return projectService(service);}
-export async function listRenderResources(request,options){if(!id(request.workspaceId))fail('HOSTED_REQUEST_INVALID');const api=transport('render',options);const services=await renderList(api,'services','&ownerId='+request.workspaceId),postgres=await renderList(api,'postgres','&ownerId='+request.workspaceId);return {services:services.filter(r=>r.ownerId===request.workspaceId).map(r=>({id:r.id,name:safeName(r.name),free:r.serviceDetails?.plan==='free'})),postgres:postgres.filter(r=>r.owner?.id===request.workspaceId).map(r=>({id:r.id,name:safeName(r.name),free:r.plan==='free',...(typeof r.expiresAt==='string'&&!Number.isNaN(Date.parse(r.expiresAt))?{expiresAt:new Date(r.expiresAt).toISOString()}:{})}))};}
+ let service;if(request.serviceId){if(!id(request.serviceId))fail('HOSTED_REQUEST_INVALID');service=await api('/services/'+request.serviceId);}else service=await uniqueResource(api,'services',identity.ownerId,identity.name);if(service)return admittedFreeService(api,service,identity,envVars,{expectedName:request.serviceId?undefined:identity.name});
+ try{const result=await api('/services',{method:'POST',body:{type:'web_service',name:identity.name,ownerId:identity.ownerId,repo:'https://github.com/ExhibitOS/platform',branch:'main',autoDeployTrigger:'off',envVars,serviceDetails:{runtime:'node',plan:'free',region:'frankfurt',numInstances:1,healthCheckPath:'/api/v1/readiness',envSpecificDetails:{buildCommand:'npm ci && npm run build',startCommand:'node scripts/render-runtime.mjs'}}}});service=result.service??result;}catch(e){if(e.message!=='HOSTED_RESULT_UNCERTAIN')throw e;service=await uniqueResource(api,'services',identity.ownerId,identity.name);if(!service)fail('HOSTED_RESULT_UNCERTAIN');return admittedFreeService(api,service,identity,envVars,{expectedName:identity.name});}assertFree(service,'services');if(service.name!==identity.name||service.ownerId!==identity.ownerId)fail('HOSTED_RESOURCE_CONFLICT');return projectService(service);}
+export async function listRenderResources(request,options){if(!id(request.workspaceId))fail('HOSTED_REQUEST_INVALID');const api=transport('render',options);const services=await renderList(api,'services','&ownerId='+request.workspaceId),postgres=await renderList(api,'postgres','&ownerId='+request.workspaceId);return {services:services.filter(r=>r.ownerId===request.workspaceId).map(r=>({id:r.id,name:safeName(r.name),free:r.serviceDetails?.plan==='free'})),postgres:postgres.filter(r=>r.owner?.id===request.workspaceId).map(r=>({id:r.id,name:safeName(r.name),free:r.plan==='free',...(postgresExpiry(r.expiresAt)!==undefined?{expiresAt:new Date(postgresExpiry(r.expiresAt)).toISOString()}:{})}))};}
 export async function executeHosted(request,options={}){
- if(!object(request)||!['cloudflare','render'].includes(request.provider)||!['accounts','services','deploy-static','deploy-api','status','reconcile'].includes(request.action))fail('HOSTED_REQUEST_INVALID');
- if(request.provider==='cloudflare'){if(['deploy-api','services'].includes(request.action))fail('HOSTED_REQUEST_INVALID');return cloudflare(request,options);}
+ if(!object(request)||!['cloudflare','render'].includes(request.provider)||!['accounts','services','deploy-static','deploy-api','status','reconcile','connect-existing'].includes(request.action))fail('HOSTED_REQUEST_INVALID');
+ if(request.provider==='cloudflare'){if(['deploy-api','services','connect-existing'].includes(request.action))fail('HOSTED_REQUEST_INVALID');return cloudflare(request,options);}
  if(request.staticOnly===true)fail('HOSTED_RENDER_NOT_REQUIRED');const api=transport('render',options),action=request.action;
  if(action==='accounts'){const owners=await renderList(api,'owners');return {...baseResult('render',action,'ready'),accounts:owners.map(r=>{if(!id(r.id))fail('HOSTED_RESPONSE_INVALID');return {id:r.id,name:safeName(r.name)};})};}
  if(action==='reconcile'){
@@ -149,9 +208,31 @@ export async function executeHosted(request,options={}){
   return observed;
  }
  if(action==='services')return {...baseResult('render',action,'ready'),...await listRenderResources(request,options)};
+ if(action==='connect-existing'){
+  // The native caller loads the original runtime account. Neither a selected
+  // publication nor the service's current name may create or replace it.
+  renderIdentity(request);
+  if(!id(request.serviceId)||!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');
+  const envVars=options.runtime?.envVars;
+  // Validate the complete original environment before any provider request;
+  // its actual origin is bound to the observed service below.
+  validateRecoveryConfiguration({envVars,origin:'https://configuration-check.onrender.com'});
+  const db=assertFree(await api('/postgres/'+request.postgresId),'postgres'),service=assertFree(await api('/services/'+request.serviceId),'services');
+  if(db.id!==request.postgresId||db.owner?.id!==request.workspaceId||db.version!=='18'||db.status!=='available'||service.id!==request.serviceId||service.ownerId!==request.workspaceId||service.type!=='web_service'||service.repo!=='https://github.com/ExhibitOS/platform'||service.serviceDetails?.runtime!=='node'||service.serviceDetails?.healthCheckPath!=='/api/v1/readiness')fail('HOSTED_RESOURCE_CONFLICT');
+  const expiresAt=projectDatabase(db).expiresAt;
+  if(expiresAt&&Date.parse(expiresAt)<=Date.now())fail('HOSTED_RECOVERY_DATABASE_EXPIRED');
+  const origin=publicURL(service.serviceDetails?.url,'onrender.com');
+  if(!origin)fail('HOSTED_RECOVERY_CONFIGURATION_REQUIRED');
+  const info=await api('/postgres/'+request.postgresId+'/connection-info');
+  if(typeof info?.internalConnectionString!=='string'||!/^postgres(?:ql)?:\/\//.test(info.internalConnectionString))fail('HOSTED_RESPONSE_INVALID');
+  const saved=await api('/services/'+request.serviceId+'/env-vars?limit=100');
+  if(!Array.isArray(saved)||saved.filter(row=>row?.envVar?.key==='DATABASE_URL').length!==1||!saved.some(row=>row?.envVar?.key==='DATABASE_URL'&&row.envVar.value===info.internalConnectionString))fail('HOSTED_RESOURCE_CONFLICT');
+  matchRecoveryConfiguration(saved,service,{envVars,origin});
+  return {...baseResult('render',action,'ready'),projectName:request.projectName,serviceId:service.id,postgresId:db.id,url:origin,...(expiresAt?{expiresAt}:{})};
+ }
  if(action==='deploy-api'){
   if(request.serviceId&&!request.postgresId)fail('RENDER_EXISTING_DATABASE_REQUIRED');
-  const envVars=runtimeEnv(options),db=await createFreePostgres(request,options);const expiresAt=db.expiresAt&&!Number.isNaN(Date.parse(db.expiresAt))?new Date(db.expiresAt).toISOString():undefined;
+  const envVars=runtimeEnv(options),db=await createFreePostgres(request,options);const expiresAt=projectDatabase(db).expiresAt;
   const result={...baseResult('render',action,'deploying'),postgresId:db.id,...(expiresAt?{expiresAt}:{})};
   if(expiresAt&&Date.parse(expiresAt)<=Date.now())return {...result,state:'failed'};
   if(db.status!=='available')return result;
@@ -161,8 +242,77 @@ export async function executeHosted(request,options={}){
  }
 
  if(action!=='status'||!id(request.workspaceId))fail('HOSTED_REQUEST_INVALID');const result={...baseResult('render',action,'needs-configuration')};
- if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');const db=assertFree(await api('/postgres/'+request.postgresId),'postgres');if(db.owner?.id!==request.workspaceId)fail('HOSTED_RESOURCE_CONFLICT');result.postgresId=db.id;if(db.expiresAt&&!Number.isNaN(Date.parse(db.expiresAt)))result.expiresAt=new Date(db.expiresAt).toISOString();result.databaseState=db.status==='available'?'available':db.status==='creating'?'creating':'unavailable';}
+ if(request.postgresId){if(!id(request.postgresId))fail('HOSTED_REQUEST_INVALID');const db=assertFree(await api('/postgres/'+request.postgresId),'postgres');if(db.owner?.id!==request.workspaceId)fail('HOSTED_RESOURCE_CONFLICT');result.postgresId=db.id;if(postgresExpiry(db.expiresAt)!==undefined)result.expiresAt=new Date(postgresExpiry(db.expiresAt)).toISOString();result.databaseState=db.status==='available'?'available':db.status==='creating'?'creating':'unavailable';}
  if(request.serviceId){if(!id(request.serviceId))fail('HOSTED_REQUEST_INVALID');const service=assertFree(await api('/services/'+request.serviceId),'services');if(service.ownerId!==request.workspaceId)fail('HOSTED_RESOURCE_CONFLICT');result.serviceId=service.id;const deploys=await api('/services/'+service.id+'/deploys?limit=1');const status=Array.isArray(deploys)?deploys[0]?.deploy?.status:null;result.state=status==='live'?'deployed':['build_failed','update_failed','canceled','pre_deploy_failed'].includes(status)?'failed':'deploying';const url=publicURL(service.serviceDetails?.url,'onrender.com');if(url)result.url=url;}
  if(result.expiresAt&&Date.parse(result.expiresAt)<=Date.now()){result.state='failed';result.databaseState='unavailable';}
  return result;
+}
+
+/** Private native recovery bridge. Not part of executeHosted's public wire.
+ * It neither suspends a service nor changes an IP rule. The selected source
+ * must already be observed suspended and an operator must confirm all other
+ * writers stopped. Connection secrets exist only within the executor callback.
+ */
+// Private native-loaded original configuration. No fallback creation, renderer
+// configuration input or secret projection is provided by this helper.
+export function validateRecoveryConfiguration(value){
+ try{
+  if(!object(value)||Object.keys(value).sort().join(',')!=='envVars,origin'||publicURL(value.origin,'onrender.com')!==value.origin||!Array.isArray(value.envVars))throw Error();
+  const required=['CLIENT_ORIGIN','TENANT_ID','ADMIN_SUBJECT','ADMIN_PASSWORD','FREEZE_SIGNING_KEY_BASE64'],optional=['STATIC_PUBLICATION_ID','STATIC_REVISION_SHA256','STATIC_INDEX_SHA256'];
+  const allowed=new Set([...required,...optional]),env=new Map();
+  for(const entry of value.envVars){if(!object(entry)||Object.keys(entry).sort().join(',')!=='key,value'||!allowed.has(entry.key)||env.has(entry.key)||typeof entry.value!=='string'||!entry.value.length||Buffer.byteLength(entry.value)>8192||entry.value.includes('\0'))throw Error();env.set(entry.key,entry.value);}
+  if(!required.every(k=>env.has(k))||![0,3].includes(optional.filter(k=>env.has(k)).length))throw Error();
+  const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+  if(publicURL(env.get('CLIENT_ORIGIN'),'pages.dev')!==env.get('CLIENT_ORIGIN')||!uuid.test(env.get('TENANT_ID'))||!/^([a-zA-Z0-9][a-zA-Z0-9_.@-]{2,127})$/.test(env.get('ADMIN_SUBJECT'))||Buffer.byteLength(env.get('ADMIN_PASSWORD'))<12||Buffer.byteLength(env.get('ADMIN_PASSWORD'))>1024)throw Error();
+  if(optional.every(k=>env.has(k))&&(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(env.get(optional[0]))||!hex(env.get(optional[1]))||!hex(env.get(optional[2]))))throw Error();
+  const bytes=Buffer.from(env.get('FREEZE_SIGNING_KEY_BASE64'),'base64');
+  try{if(bytes.toString('base64')!==env.get('FREEZE_SIGNING_KEY_BASE64'))throw Error();const key=createPrivateKey({key:bytes,format:'der',type:'pkcs8'});if(key.asymmetricKeyType!=='ed25519')throw Error();const publicKey=createPublicKey(key).export({format:'der',type:'spki'});return {origin:value.origin,keyId:sha(publicKey),publicKey:publicKey.toString('base64')};}finally{bytes.fill(0);}
+ }catch{fail('HOSTED_RECOVERY_CONFIGURATION_REQUIRED');}
+}
+function matchRecoveryConfiguration(saved,service,expected){
+ try{
+  if(!Array.isArray(saved)||saved.length>100)throw Error();
+  const selected=new Set(['CLIENT_ORIGIN','TENANT_ID','ADMIN_SUBJECT','ADMIN_PASSWORD','FREEZE_SIGNING_KEY_BASE64','STATIC_PUBLICATION_ID','STATIC_REVISION_SHA256','STATIC_INDEX_SHA256','AUTH_ORIGIN','RENDER_EXTERNAL_URL']),env=new Map();
+  for(const row of saved){const e=row?.envVar;if(!e||!selected.has(e.key))continue;if(env.has(e.key)||typeof e.value!=='string')throw Error();env.set(e.key,e.value);}
+  const origin=env.get('AUTH_ORIGIN')??env.get('RENDER_EXTERNAL_URL')??publicURL(service.serviceDetails?.url,'onrender.com');
+  const actual={origin,envVars:[...env].filter(([key])=>!['AUTH_ORIGIN','RENDER_EXTERNAL_URL'].includes(key)).map(([key,value])=>({key,value}))};
+  const authority=validateRecoveryConfiguration(actual),wanted=validateRecoveryConfiguration(expected);
+  if(authority.origin!==wanted.origin||authority.keyId!==wanted.keyId||authority.publicKey!==wanted.publicKey||actual.envVars.length!==expected.envVars.length||!expected.envVars.every(e=>env.get(e.key)===e.value))throw Error();
+ }catch{fail('HOSTED_RECOVERY_CONFIGURATION_CHANGED');}
+}
+export async function withRenderRecoveryConnection(request,options,consume){
+ if(!object(request)||Object.keys(request).sort().join(',')!=='postgresId,serviceId,workspaceId'||![request.workspaceId,request.serviceId,request.postgresId].every(id)||typeof consume!=='function')fail('HOSTED_RECOVERY_REQUEST');
+ validateRecoveryConfiguration(options?.expectedConfiguration);
+ const cidr=options?.sourceCidr;
+ const {isIP}=await import('node:net');
+ if(typeof cidr!=='string'||cidr.length>64)fail('HOSTED_RECOVERY_NETWORK_REQUIRED');
+ const parts=cidr.split('/'),family=isIP(parts[0]);
+ if(parts.length!==2||!(family===4&&parts[1]==='32'||family===6&&parts[1]==='128'))fail('HOSTED_RECOVERY_NETWORK_REQUIRED');
+ const api=transport('render',options),db=assertFree(await api('/postgres/'+request.postgresId),'postgres'),service=assertFree(await api('/services/'+request.serviceId),'services');
+ if(db.id!==request.postgresId||db.owner?.id!==request.workspaceId||db.version!=='18'||db.status!=='available'||service.id!==request.serviceId||service.ownerId!==request.workspaceId||service.type!=='web_service'||service.repo!=='https://github.com/ExhibitOS/platform'||service.serviceDetails?.runtime!=='node'||service.serviceDetails?.healthCheckPath!=='/api/v1/readiness')fail('HOSTED_RESOURCE_CONFLICT');
+ const expiresAt=projectDatabase(db).expiresAt;
+ if(expiresAt&&Date.parse(expiresAt)<=Date.now())fail('HOSTED_RECOVERY_DATABASE_EXPIRED');
+ if(!Array.isArray(db.ipAllowList)||!db.ipAllowList.some(rule=>object(rule)&&rule.cidrBlock===cidr))fail('HOSTED_RECOVERY_NETWORK_REQUIRED');
+ if(service.suspended!=='suspended')fail('HOSTED_RECOVERY_WRITERS_ACTIVE');
+ const info=await api('/postgres/'+request.postgresId+'/connection-info');
+ if(typeof info?.internalConnectionString!=='string'||typeof info.externalConnectionString!=='string')fail('HOSTED_RESPONSE_INVALID');
+ const saved=await api('/services/'+request.serviceId+'/env-vars?limit=100');
+ if(!Array.isArray(saved)||saved.filter(row=>row?.envVar?.key==='DATABASE_URL').length!==1||!saved.some(row=>row?.envVar?.key==='DATABASE_URL'&&row.envVar.value===info.internalConnectionString))fail('HOSTED_RESOURCE_CONFLICT');
+ matchRecoveryConfiguration(saved,service,options.expectedConfiguration);
+ let external,internal;try{external=new URL(info.externalConnectionString);internal=new URL(info.internalConnectionString);}catch{fail('HOSTED_RESPONSE_INVALID');}
+ if(!['postgres:','postgresql:'].includes(external.protocol)||!['postgres:','postgresql:'].includes(internal.protocol)||!external.username||!external.password||external.username!==internal.username||external.password!==internal.password||external.pathname!==internal.pathname||external.hostname.split('.')[0]!==internal.hostname||external.pathname.length<2||external.hash||external.port&&external.port!=='5432'||!/^[a-z0-9-]+\.[a-z0-9-]+-postgres\.render\.com$/.test(external.hostname))fail('HOSTED_RECOVERY_CONNECTION_INVALID');
+ if([...external.searchParams].some(([key,value])=>key!=='sslmode'||!['require','verify-full'].includes(value))||external.searchParams.getAll('sslmode').length>1)fail('HOSTED_RECOVERY_TLS_REQUIRED');
+ external.search='';external.searchParams.set('sslmode','verify-full');
+ if(typeof options.confirmExternalWritersStopped!=='function'||await options.confirmExternalWritersStopped({workspaceId:request.workspaceId,serviceId:request.serviceId,postgresId:request.postgresId})!==true)fail('HOSTED_RECOVERY_OPERATOR_REQUIRED');
+ let output;
+ try{output=await consume({url:external.href});}catch{fail('HOSTED_RECOVERY_EXECUTION_FAILED');}
+ // A resumed/changed remote source leaves any created local archive intact but
+ // does not receive an all-writers-paused completion claim.
+ const after=assertFree(await api('/services/'+request.serviceId),'services');
+ if(after.id!==service.id||after.ownerId!==service.ownerId||after.suspended!=='suspended')fail('HOSTED_RECOVERY_SOURCE_CHANGED');
+ const finalEnv=await api('/services/'+request.serviceId+'/env-vars?limit=100');
+ if(!Array.isArray(finalEnv)||finalEnv.filter(row=>row?.envVar?.key==='DATABASE_URL').length!==1||!finalEnv.some(row=>row?.envVar?.key==='DATABASE_URL'&&row.envVar.value===info.internalConnectionString))fail('HOSTED_RESOURCE_CONFLICT');
+ matchRecoveryConfiguration(finalEnv,after,options.expectedConfiguration);
+ if(!object(output)||Object.keys(output).sort().join(',')!=='authenticatedManifestSha256,backupId,files,operation'||output.operation!=='created-and-verified'||typeof output.backupId!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(output.backupId)||!Number.isSafeInteger(output.files)||output.files<1||output.files>100000||!hex(output.authenticatedManifestSha256))fail('HOSTED_RECOVERY_RESULT_INVALID');
+ return {provider:'render',action:'local-encrypted-backup',workspaceId:request.workspaceId,serviceId:request.serviceId,postgresId:request.postgresId,...(expiresAt?{expiresAt}:{}),...output};
 }

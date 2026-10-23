@@ -81,3 +81,139 @@ Cloudflare reconcile reads the project first, then reads its deployment list. Mi
 Deployment history uses `per_page=20&page=N`, matching the official example page size, and reads numeric `result_info.total_pages` when supplied. Without page metadata it continues full pages until a short page; a 100-page scan limit fails closed rather than assuming no deployment exists. The earlier single `per_page=100` request was rejected in a real account with numeric code8000024. The official reference does not state a maximum or define that numeric code, so no universal limit is claimed. Reference: [List Pages deployments](https://developers.cloudflare.com/api/resources/pages/subresources/projects/subresources/deployments/methods/list/).
 
 The optional `onStage` diagnostic callback receives only a closed set of local request/build stages. Stage selection does not use response messages, URLs or account identifiers; form construction is marked before creating FormData. It changes no request data or retry policy.
+
+## Private recovery adapter (2026-10-18)
+
+`withRenderRecoveryConnection` is an internal native-executor bridge, outside
+`executeHosted`'s public six-action wire. It observes only GET endpoints: selected
+free PostgreSQL18 and owner, matching service DATABASE_URL, actual service
+suspension, expiry, exact operator-confirmed `/32` or `/128` IP entry and explicit
+confirmation that other writers stopped. It passes the external connection only
+to an in-process callback with mandatory certificate/hostname verification. It
+returns a strictly projected encrypted-backup receipt and rechecks suspension.
+It neither suspends/resumes resources nor changes network rules. Callback errors
+and malformed results use fixed redacted codes.
+
+Six synthetic Node unit cases qualify that routing/guard boundary only. Real
+Render access, TLS, DB identity/snapshot privileges, stopped-writer enforcement,
+pg_dump, encrypted local backup, independent restore and Manager UI remain
+unqualified. An empty IP list blocks external access; the bridge never replaces
+it with allow-all or discovers public IP through a third service. If necessary,
+a user must authorize/add a narrow range in the official Render screen. This is
+not a completed remote recovery product flow or a replacement for T10-05's
+update/interruption/restore/rollback checks. Existing local Manager installation
+archives and hosted DB archives have different configuration roles; never forge
+local installation records to make one appear to be the other.
+
+### Load-only original configuration fence
+
+The private recovery bridge now also requires native-loaded
+`expectedConfiguration={envVars,origin}`. Its5 required values are the existing
+CLIENT_ORIGIN, TENANT_ID, ADMIN_SUBJECT, ADMIN_PASSWORD and
+FREEZE_SIGNING_KEY_BASE64. Existing STATIC publication/revision/index pins are
+all present or all absent; missing values are never supplied from the currently
+selected export. Validation reuses existing auth/Pages ID and URL limits and
+requires an Ed25519 PKCS8 key. It derives the public key/keyId without returning
+private key bytes.
+
+Before invoking the executor, the observed service's private env-vars must match
+the original values and authority exactly, with its AUTH_ORIGIN, configured
+RENDER_EXTERNAL_URL or verified service URL matching the original origin. Duplicate
+reserved fields, missing/partial pins, wrong tenant/admin/client/key or origin
+fail closed. Env-vars and suspension are rechecked afterward. These are GET-only
+observations; the original signing key/admin password remain inside the
+native-to-runner/provider comparison boundary and are not supplied to the backup
+helper, archive, renderer or projected receipt. Missing/malformed protected source
+configuration yields HOSTED_RECOVERY_CONFIGURATION_REQUIRED; a remote mismatch
+yields HOSTED_RECOVERY_CONFIGURATION_CHANGED. These are fixed codes, not provider
+response text.
+
+Eight synthetic tests cover the extended fence. No real Keychain/Render values
+were read. A mutable runtime-Keychain entry is not an immutable backup-time
+configuration snapshot: job-bound protected configuration preservation, database
+freeze-authority confirmation, active deploy ID/commit, trusted runtime artifacts,
+Pages restoration and activation/update/rollback remain unimplemented/unverified.
+The Platform's separate real local TLS/SQL/crypto qualification does not establish
+actual provider or native load-only behavior.
+
+### Free PostgreSQL acquisition and retry admission
+
+Before a new PostgreSQL POST, the existing deploy adapter lists the selected
+workspace's retained databases. It reuses the exact operation project name if
+that candidate appears after the initial lookup. Another active or uncertain free database
+causes `HOSTED_RESOURCE_CONFLICT` before POST: preserve it and review the selected
+workspace/database; the adapter never deletes it, switches workspaces, or upgrades
+plans. Explicit ID and same-name retry reuse both verify owner, free plan,
+Frankfurt region, PostgreSQL18, supported creating/available state and any reported
+expiry. An uncertain POST is reconciled by the same exact-name lookup, without a
+second POST. The list/read check is not an atomic reservation; concurrent external
+creation can still cause a provider refusal, and no retry invents completion.
+
+This admission is shared by the existing deploy route. It does not prove a
+restoration target is empty, bind a remote restoration operation, import SQL,
+activate a restored service, or complete remote backup/update/rollback. Those
+steps remain separate from the existing isolated local restore-check job. [Render’s free-instance limit](https://render.com/docs/free#single-instance-limit)
+permits only one active free PostgreSQL instance per workspace; expiry and retained
+resources must be reviewed without deleting the source or enabling paid plans.
+
+A different retained database with a valid provider `expiresAt` at or before the
+current time does not permanently consume the local admission slot. Its status
+must still be a recognized provider state; missing/malformed expiry or unknown
+status never proves inactivity. The adapter may then request one new free
+instance while leaving the expired source untouched. Render can still reject the
+request; this is not a guarantee of account eligibility or quota availability.
+An explicitly selected or same-operation-name expired ID returns
+`HOSTED_RECOVERY_DATABASE_EXPIRED`, never automatic replacement or deletion.
+Status names and a `creating` success response follow the official
+[Postgres creation schema](https://api-docs.render.com/reference/create-postgres)
+and [retrieval schema](https://api-docs.render.com/reference/retrieve-postgres).
+
+Provider expiry values must be RFC3339 date-times with an explicit timezone and a valid calendar date. Legacy date strings, timezone omissions and calendar rollover are rejected rather than interpreted as proof of expiration or displayed as a confirmed provider expiry. This adds no resource creation, deletion or paid fallback.
+
+The native recovery caller may pass an optional in-process `onPostgresCreated({id, ownerId, name})` hook to bind its private operation journal to an admitted, successful creation POST response. The hook is awaited, receives no credentials, and does not change the public six-action request/result wire. Selected or same-name discoveries and lost-response GET reconciliation never emit this creation event. Hook persistence failure reports fixed uncertainty without repeating creation. Discovering a database is not proof that the current operation created it or permission to change its IP rules.
+
+
+### Existing Render recovery connection
+
+`executeHosted` accepts Render `connect-existing` with explicit `workspaceId`, `serviceId`, `postgresId`, and the original `projectName`. The native caller must load that project's existing runtime configuration into `options.runtime.envVars`; this action never creates configuration or infers the original project from a service name. Four authenticated GETs observe the selected Postgres, service, Postgres connection-info, and service environment. Free ownership, PostgreSQL18 availability/expiry, platform Node service identity/readiness path, original configuration and exact database URL pairing must match.
+
+The returned `ready` receipt identifies an observed connection, not a live deploy, backup or recovery point. It contains only public identifiers, origin and optional expiry. Both running and suspended services can be connected; no service suspension, IP change, SQL connection, resource creation or key generation occurs. The caller separately stores connection metadata and preserves unrelated publication history. Backup execution must still revalidate current source and all existing writer/network/key admission conditions.
+
+### Isolated Pages cleanup procedure
+
+The first-release adapter and Manager do not issue remote DELETE requests;
+`disconnect` only removes the local provider connection. Cleanup is an explicit
+operator action through the official provider API. A successful deployment,
+reconciliation, or preserved resource is not evidence that cleanup ran.
+
+1. Use an explicitly authorized isolated account and a uniquely named, empty
+   temporary Pages project designated for the cleanup check. Confirm the current
+   account's cost/quota conditions before creation; do not change billing or add
+   Functions, storage, a Git integration, or a custom domain. Existing reference
+   exhibitions, original data, keys, and backups are outside this procedure.
+2. Record the exact account, project name, returned project ID and creation time
+   from the successful creation response. Check absence before creation. If that
+   write is uncertain, observe the exact target and retain it; do not repeat the
+   POST or infer that a same-name project belongs to this operation.
+3. Before deletion, re-read that exact project. Match the recorded identity and
+   confirm that it still has no deployments, custom domains, connected source,
+   secrets or resource bindings. A mismatch, new content, or incomplete read
+   stops cleanup. An unconfirmed creation or discovery alone is not ownership.
+4. Obtain authorization for irreversible deletion of this exact temporary
+   target. With the existing account token held only in the authorized client's
+   memory, issue `DELETE /accounts/{account_id}/pages/projects/{project_name}`
+   at `https://api.cloudflare.com/client/v4`. This permanently deletes the
+   project and any deployments; do not apply it to a retained exhibition.
+5. Record the redacted deletion result and an authorized follow-up observation
+   confirming the exact project's absence. A timeout, permission failure or
+   ambiguous response is unresolved; do not blindly retry deletion or broaden
+   the target. Retain the creation/deletion evidence and the independent free
+   apply/resource-preservation evidence at their actual scopes.
+
+This documents the destroy procedure, not a completed cleanup run or permission
+to use an unapproved account. Render service/Postgres deletion is outside this
+procedure. Tokens and raw provider bodies must not enter logs or evidence.
+See Cloudflare's [project creation](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/create/),
+[project observation](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/get/),
+[permanent project deletion](https://developers.cloudflare.com/api/resources/pages/subresources/projects/methods/delete/),
+and [current Pages limits](https://developers.cloudflare.com/pages/platform/limits/).
